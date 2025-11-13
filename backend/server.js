@@ -150,18 +150,10 @@ class OCRProcessor {
         const pdfBuffer = await fs.readFile(pdfPath);
         const pdfData = await pdfParse(pdfBuffer);
 
-        // Se o PDF já tem texto, retornar
-        if (pdfData.text && pdfData.text.trim().length > 100) {
-            return {
-                type: 'native_text',
-                pages: [{
-                    pageNum: 1,
-                    text: pdfData.text,
-                    confidence: 100
-                }],
-                totalText: pdfData.text
-            };
-        }
+        // CORREÇÃO CRÍTICA: Removida verificação de texto nativo
+        // Motivo: PDFs mistos (digital + escaneado) eram ignorados
+        // Solução: SEMPRE executar OCR em todas as páginas para capturar
+        // tanto texto digital quanto digitalizado
 
         // Converter PDF em imagens
         const pdf2pic = require('pdf2pic');
@@ -274,12 +266,18 @@ class OCRProcessor {
 
     // Criar PDF pesquisável com layout preservado
     async createSearchablePDF(originalPdfPath, ocrResults) {
+        // CORREÇÃO: Definir dimensões exatas da imagem usada no OCR
+        // Estas são as dimensões configuradas em pdf2pic (linhas 160-165)
+        const IMAGE_WIDTH = 2480;
+        const IMAGE_HEIGHT = 3508;
+
         const existingPdfBytes = await fs.readFile(originalPdfPath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         const pages = pdfDoc.getPages();
 
         console.log('📄 Gerando PDF pesquisável com layout preservado...', {
-            pages: ocrResults.pages.length
+            pages: ocrResults.pages.length,
+            imageResolution: `${IMAGE_WIDTH}x${IMAGE_HEIGHT}`
         });
 
         // Adicionar camada de texto invisível com coordenadas corretas
@@ -296,11 +294,17 @@ class OCRProcessor {
 
             // Se temos coordenadas de palavras, usar posicionamento preciso
             if (pageData.words && pageData.words.length > 0) {
-                // CORREÇÃO: Usar coordenadas reais das palavras
-                // A imagem renderizada tem resolução maior que o PDF original
-                // Precisamos calcular o fator de escala
-                const firstWord = pageData.words[0];
-                const imageHeight = firstWord.bbox ? firstWord.bbox.y1 * 2 : pdfHeight; // Estimativa
+                // CORREÇÃO: Calcular fatores de escala corretos
+                // Converter coordenadas da imagem OCR (IMAGE_WIDTH x IMAGE_HEIGHT)
+                // para coordenadas do PDF (pdfWidth x pdfHeight)
+                const scaleX = pdfWidth / IMAGE_WIDTH;
+                const scaleY = pdfHeight / IMAGE_HEIGHT;
+
+                console.log(`📐 Escala página ${i + 1}:`, {
+                    pdfSize: `${pdfWidth.toFixed(1)}x${pdfHeight.toFixed(1)}`,
+                    imageSize: `${IMAGE_WIDTH}x${IMAGE_HEIGHT}`,
+                    scale: `${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`
+                });
 
                 let wordsAdded = 0;
 
@@ -310,11 +314,7 @@ class OCRProcessor {
 
                     const bbox = word.bbox;
 
-                    // Converter coordenadas da imagem OCR para coordenadas PDF
-                    // OCR usa origem no topo-esquerdo, PDF usa origem no inferior-esquerdo
-                    const scaleX = pdfWidth / (bbox.x1 * 2); // Ajuste baseado na resolução
-                    const scaleY = pdfHeight / imageHeight;
-
+                    // Converter coordenadas (OCR usa origem topo-esquerdo, PDF usa inferior-esquerdo)
                     const x = bbox.x0 * scaleX;
                     const y = pdfHeight - (bbox.y1 * scaleY); // Inverter Y
                     const wordHeight = (bbox.y1 - bbox.y0) * scaleY;
