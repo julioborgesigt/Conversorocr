@@ -1277,6 +1277,11 @@
                             format: [pdfWidth, pdfHeight]
                         });
 
+                        console.log('📄 Gerando PDF pesquisável...', {
+                            pages: this.extractedPages.length,
+                            pdfDimensions: { width: pdfWidth, height: pdfHeight }
+                        });
+
                         // Processar cada página
                         for (let i = 0; i < this.extractedPages.length; i++) {
                             if (i > 0) pdf.addPage([pdfWidth, pdfHeight]);
@@ -1305,18 +1310,25 @@
                             // CORREÇÃO: Adicionar texto com posicionamento correto
                             const pageData = this.extractedPages[i];
 
+                            console.log(`📄 Página ${i + 1}:`, {
+                                hasWords: !!pageData.words,
+                                wordCount: pageData.words ? pageData.words.length : 0,
+                                sampleWord: pageData.words && pageData.words[0] ? pageData.words[0] : null
+                            });
+
                             if (pageData.words && pageData.words.length > 0) {
                                 // Calcular fator de escala (coordenadas OCR -> coordenadas PDF)
                                 const scaleX = pdfWidth / viewport.width;
                                 const scaleY = pdfHeight / viewport.height;
 
-                                // Definir texto como invisível (transparente)
-                                pdf.setTextColor(255, 255, 255);
-                                pdf.setGState(new pdf.GState({ opacity: 0 }));
+                                console.log(`📐 Escala página ${i + 1}:`, { scaleX, scaleY });
+
+                                let wordsAdded = 0;
 
                                 // Posicionar cada palavra nas coordenadas corretas
                                 for (const word of pageData.words) {
-                                    if (!word.text || !word.bbox) continue;
+                                    if (!word.text || word.text.trim() === '') continue;
+                                    if (!word.bbox) continue;
 
                                     // Coordenadas da palavra (bbox = bounding box)
                                     const bbox = word.bbox;
@@ -1326,27 +1338,24 @@
                                     const wordHeight = (bbox.y1 - bbox.y0) * scaleY;
 
                                     // Calcular tamanho da fonte baseado na altura da palavra
-                                    let fontSize = wordHeight * 0.8; // 80% da altura para não ficar muito grande
+                                    let fontSize = wordHeight * 0.8;
+                                    fontSize = Math.max(6, Math.min(fontSize, 72));
 
-                                    // Limitar tamanho da fonte
-                                    fontSize = Math.max(4, Math.min(fontSize, 72));
-
+                                    // Usar cor branca (invisível em fundo branco)
+                                    pdf.setTextColor(255, 255, 255);
                                     pdf.setFontSize(fontSize);
 
                                     // Adicionar palavra na posição exata
-                                    // Usar renderingMode 3 = invisível mas selecionável
-                                    pdf.text(word.text, x, y + wordHeight, {
-                                        baseline: 'bottom',
-                                        renderingMode: 'invisible'
-                                    });
+                                    pdf.text(word.text, x, y + wordHeight);
+
+                                    wordsAdded++;
                                 }
 
-                                // Restaurar opacidade normal
-                                pdf.setGState(new pdf.GState({ opacity: 1 }));
+                                console.log(`✅ Página ${i + 1}: ${wordsAdded} palavras adicionadas`);
+
                             } else {
-                                // Fallback: se não tem coordenadas, usar método antigo
-                                // (para páginas com texto nativo)
-                                console.warn(`Página ${i + 1}: sem dados de coordenadas, usando fallback`);
+                                // Fallback: adicionar texto como bloco
+                                console.warn(`⚠️ Página ${i + 1}: sem coordenadas, usando texto completo`);
 
                                 pdf.setTextColor(255, 255, 255);
                                 pdf.setFontSize(8);
@@ -1369,8 +1378,10 @@
 
                         this.processing = false;
                         this.showMessage('✅ PDF pesquisável com layout preservado gerado com sucesso!', 'success');
+
+                        console.log('✅ PDF gerado com sucesso:', fileName);
                     } catch (error) {
-                        console.error('Erro ao gerar PDF:', error);
+                        console.error('❌ Erro ao gerar PDF:', error);
                         this.processing = false;
                         this.showMessage('Erro ao gerar PDF: ' + error.message, 'error');
                     }
