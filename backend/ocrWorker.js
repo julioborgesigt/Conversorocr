@@ -8,6 +8,10 @@ const fs = require('fs').promises;
     try {
         const { imagePath, language, params, enhanceImage } = workerData;
 
+        // CORREÇÃO: Obter dimensões da imagem ANTES de processar
+        // Isso é necessário para calcular escala correta no PDF pesquisável
+        const metadata = await sharp(imagePath).metadata();
+
         // Pré-processar imagem se necessário
         let processedPath = imagePath;
         if (enhanceImage) {
@@ -41,12 +45,15 @@ const fs = require('fs').promises;
         }
 
         // Enviar resultado de volta para o thread principal
+        // CORREÇÃO: Incluir dimensões da imagem para cálculo de escala no PDF pesquisável
         parentPort.postMessage({
             success: true,
             data: {
                 text: result.data.text,
                 confidence: result.data.confidence,
-                words: result.data.words
+                words: result.data.words,
+                imageWidth: metadata.width,   // Largura real da imagem
+                imageHeight: metadata.height  // Altura real da imagem
             }
         });
 
