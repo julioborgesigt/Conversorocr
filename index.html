@@ -233,7 +233,7 @@
                                     </v-chip>
                                 </v-card-title>
                                 <v-card-text>
-                                    <div v-if="currentPageCanvas" class="canvas-container">
+                                    <div v-if="pdfDocument" class="canvas-container">
                                         <canvas ref="pdfCanvas" class="page-canvas"></canvas>
                                         <div v-if="processing" class="ocr-overlay"></div>
                                     </div>
@@ -522,6 +522,9 @@
 
                         this.totalPages = this.pdfDocument.numPages;
                         this.currentPage = 1;
+
+                        // Aguarda Vue renderizar o canvas no DOM
+                        await this.$nextTick();
 
                         await this.renderPage(1);
 
