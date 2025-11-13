@@ -231,14 +231,22 @@ class OCRProcessor {
                 progressCallback(results.length, pageCount);
             }
 
-            // Limpar imagens temporárias do lote
-            for (const { path } of batch) {
-                await fs.unlink(path).catch(() => {});
-            }
+            // NÃO limpar arquivos aqui - aguardar todos os batches completarem
         }
 
         // Ordenar resultados por número de página
         results.sort((a, b) => a.pageNum - b.pageNum);
+
+        // CORREÇÃO EPIPE: Aguardar um momento para garantir que todos os streams foram fechados
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Limpar TODOS os arquivos temporários (incluindo _enhanced.png criados pelo ocrWorker)
+        console.log('🧹 Limpando arquivos temporários...');
+        for (const { path } of imagePaths) {
+            await fs.unlink(path).catch(() => {});
+            // Também tentar limpar arquivo enhanced (se existir)
+            await fs.unlink(path.replace('.png', '_enhanced.png')).catch(() => {});
+        }
 
         return {
             type: 'ocr_parallel',
