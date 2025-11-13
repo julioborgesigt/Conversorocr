@@ -155,24 +155,70 @@ class OCRProcessor {
         // Solução: SEMPRE executar OCR em todas as páginas para capturar
         // tanto texto digital quanto digitalizado
 
-        // Converter PDF em imagens
-        const pdf2pic = require('pdf2pic');
-        const converter = new pdf2pic.fromPath(pdfPath, {
-            density: 300,
-            savename: 'page',
-            savedir: './temp',
-            format: 'png',
-            width: 2480,
-            height: 3508
-        });
+        // Garantir que diretório temp existe
+        const tempDir = path.join(__dirname, 'temp');
+        await fs.mkdir(tempDir, { recursive: true });
 
         const pageCount = pdfData.numpages;
         const imagePaths = [];
 
-        // Converter todas as páginas para imagens
-        for (let i = 1; i <= pageCount; i++) {
-            const page = await converter(i);
-            imagePaths.push({ pageNum: i, path: page.path });
+        console.log(`📄 Convertendo ${pageCount} páginas para imagens...`);
+
+        // CORREÇÃO EPIPE: Usar abordagem mais robusta para conversão
+        // pdf2pic requer GraphicsMagick/ImageMagick que pode não estar no Windows
+        try {
+            const pdf2pic = require('pdf2pic');
+
+            // Tentar converter com pdf2pic (método preferido se GM/IM disponível)
+            const timestamp = Date.now();
+            const converter = pdf2pic.fromPath(pdfPath, {
+                density: 300,
+                savename: `page_${timestamp}`,
+                savedir: tempDir,
+                format: 'png',
+                width: 2480,
+                height: 3508
+            });
+
+            // Converter páginas sequencialmente para evitar sobrecarga
+            for (let i = 1; i <= pageCount; i++) {
+                try {
+                    const page = await converter(i, { responseType: 'image' });
+
+                    // Verificar se arquivo foi criado
+                    if (!page.path || !await fs.access(page.path).then(() => true).catch(() => false)) {
+                        throw new Error('Arquivo de imagem não foi criado');
+                    }
+
+                    imagePaths.push({ pageNum: i, path: page.path });
+                    console.log(`✓ Página ${i}/${pageCount} convertida`);
+
+                    // Pequeno delay para evitar sobrecarga
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (error) {
+                    console.error(`❌ Erro ao converter página ${i}:`, error.message);
+                    throw new Error(`Falha ao converter página ${i} do PDF.
+
+⚠️ POSSÍVEL CAUSA: GraphicsMagick ou ImageMagick não está instalado.
+
+📦 SOLUÇÃO PARA WINDOWS:
+1. Baixe GraphicsMagick: http://www.graphicsmagick.org/download.html
+2. Instale com todas as opções padrão
+3. Reinicie o terminal e tente novamente
+
+📦 SOLUÇÃO PARA LINUX/MAC:
+# Ubuntu/Debian:
+sudo apt-get install graphicsmagick
+
+# macOS:
+brew install graphicsmagick
+
+Erro original: ${error.message}`);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Erro no sistema de conversão de PDF:', error);
+            throw error;
         }
 
         // Detectar número de CPUs disponíveis
