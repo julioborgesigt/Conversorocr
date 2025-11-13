@@ -840,6 +840,8 @@
                         };
 
                         // MELHORIA 1 & FASE 1: Processar páginas (com texto nativo ou OCR)
+                        // CORREÇÃO CRÍTICA: Usar workers individuais para garantir dados completos
+                        let workerIndex = 0;
                         const jobs = pages.map(({ pageNum, canvas, nativeText, skipOCR }) => {
                             if (skipOCR && nativeText) {
                                 // Página tem texto nativo, retornar direto!
@@ -853,9 +855,27 @@
                                 });
                             }
 
-                            // Processar com OCR em paralelo
-                            return scheduler.addJob('recognize', canvas).then(result => {
+                            // CORREÇÃO: Usar worker diretamente em vez de scheduler para obter dados completos
+                            const worker = workers[workerIndex % workers.length];
+                            workerIndex++;
+
+                            return worker.recognize(canvas).then(result => {
                                 updateMetrics();
+
+                                // DEBUG: Verificar estrutura de dados retornada
+                                console.log(`🔍 DEBUG Página ${pageNum}:`, {
+                                    hasResult: !!result,
+                                    hasData: !!result.data,
+                                    dataKeys: result.data ? Object.keys(result.data) : [],
+                                    hasWords: !!(result.data && result.data.words),
+                                    wordCount: result.data && result.data.words ? result.data.words.length : 0,
+                                    sampleWord: result.data && result.data.words && result.data.words[0] ? {
+                                        text: result.data.words[0].text,
+                                        hasBbox: !!result.data.words[0].bbox,
+                                        bbox: result.data.words[0].bbox
+                                    } : null
+                                });
+
                                 // MELHORIA 5: Aplicar pós-processamento
                                 const processedText = this.postProcessText(result.data.text);
                                 return {
@@ -865,7 +885,8 @@
                                     native: false,
                                     // CORREÇÃO: Armazenar dados de palavras com coordenadas
                                     words: result.data.words || [],
-                                    lines: result.data.lines || []
+                                    lines: result.data.lines || [],
+                                    _debug: result.data // Store full data for debugging
                                 };
                             });
                         });
@@ -877,6 +898,9 @@
                         this.extractedPages.sort((a, b) => a.pageNum - b.pageNum);
 
                         // Limpar workers
+                        for (const worker of workers) {
+                            await worker.terminate();
+                        }
                         await scheduler.terminate();
 
                         // Compilar resultados
