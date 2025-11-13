@@ -508,17 +508,22 @@
                 
                 async loadPDF(file) {
                     this.pdfFile = file;
-                    
+
                     try {
                         const arrayBuffer = await file.arrayBuffer();
-                        this.pdfDocument = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+                        const typedArray = new Uint8Array(arrayBuffer);
+
+                        const loadingTask = pdfjsLib.getDocument({data: typedArray});
+                        this.pdfDocument = await loadingTask.promise;
+
                         this.totalPages = this.pdfDocument.numPages;
                         this.currentPage = 1;
-                        
+
                         await this.renderPage(1);
-                        
+
                         this.showMessage('PDF carregado com sucesso!', 'success');
                     } catch (error) {
+                        console.error('PDF loading error details:', error);
                         this.showMessage('Erro ao carregar PDF: ' + error.message, 'error');
                     }
                 },
