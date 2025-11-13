@@ -514,7 +514,11 @@
                         const typedArray = new Uint8Array(arrayBuffer);
 
                         const loadingTask = pdfjsLib.getDocument({data: typedArray});
-                        this.pdfDocument = await loadingTask.promise;
+                        const pdfDoc = await loadingTask.promise;
+
+                        // Use markRaw para prevenir que Vue torne o PDF reativo
+                        // Isso evita problemas com membros privados do PDF.js
+                        this.pdfDocument = Vue.markRaw(pdfDoc);
 
                         this.totalPages = this.pdfDocument.numPages;
                         this.currentPage = 1;
