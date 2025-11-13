@@ -1,0 +1,36 @@
+# Node modules
+backend/node_modules
+node_modules
+
+# Arquivos temporários
+backend/temp/*
+backend/uploads/*
+*.log
+
+# Arquivos de desenvolvimento
+.git
+.gitignore
+*.md
+!README.md
+
+# Backup files
+*.backup
+index.html.backup
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files (não deve estar no image)
+.env
+.env.local
+
+# Documentação (opcional - remova se quiser incluir)
+REFACTORING_SUMMARY.md
+BUGFIXES_SEGUNDA_AUDITORIA.md
+TESTE_RAPIDO.md
+INSTALACAO_WINDOWS.md

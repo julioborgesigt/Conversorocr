@@ -3,8 +3,6 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
-const { createWorker } = require('tesseract.js');
-const pdf = require('pdf-parse');
 const sharp = require('sharp');
 const { PDFDocument, rgb } = require('pdf-lib');
 const pdfParse = require('pdf-parse');
@@ -57,93 +55,9 @@ class OCRProcessor {
     // Pré-processamento agora é feito de forma segura no ocrWorker.js
 
     // Executar OCR em uma imagem (método legado - usar processPDFParallel ao invés)
-    async performOCR(imagePath) {
-        // NOTA: Pré-processamento agora é feito no ocrWorker.js
-        let processedPath = imagePath;
-        
-        const worker = await createWorker(this.language);
-        
-        // Configurar parâmetros do Tesseract
-        await worker.setParameters({
-            tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
-            preserve_interword_spaces: '1',
-            tessedit_char_whitelist: this.mode === 'best' ? 
-                '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÄÇÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜàáâãäçèéêëìíîïòóôõöùúûü .,;:!?-/()""\'' : 
-                undefined
-        });
-        
-        const result = await worker.recognize(processedPath);
-        await worker.terminate();
-        
-        // Limpar arquivo processado
-        if (processedPath !== imagePath) {
-            await fs.unlink(processedPath).catch(() => {});
-        }
-        
-        return {
-            text: result.data.text,
-            confidence: result.data.confidence,
-            words: result.data.words
-        };
-    }
-
-    // Processar PDF completo
-    async processPDF(pdfPath, progress) {
-        const pdfBuffer = await fs.readFile(pdfPath);
-        const pdfData = await pdfParse(pdfBuffer);
-        
-        // Se o PDF já tem texto, retornar
-        if (pdfData.text && pdfData.text.trim().length > 100) {
-            return {
-                type: 'native_text',
-                pages: [{
-                    pageNum: 1,
-                    text: pdfData.text,
-                    confidence: 100
-                }],
-                totalText: pdfData.text
-            };
-        }
-        
-        // Converter PDF em imagens e processar com OCR
-        const pdf2pic = require('pdf2pic');
-        const converter = new pdf2pic.fromPath(pdfPath, {
-            density: 300,
-            savename: 'page',
-            savedir: './temp',
-            format: 'png',
-            width: 2480,
-            height: 3508
-        });
-        
-        const results = [];
-        const pageCount = pdfData.numpages;
-        
-        for (let i = 1; i <= pageCount; i++) {
-            if (progress) {
-                progress(i, pageCount);
-            }
-            
-            const page = await converter(i);
-            const ocrResult = await this.performOCR(page.path);
-            
-            results.push({
-                pageNum: i,
-                text: ocrResult.text,
-                confidence: ocrResult.confidence,
-                words: ocrResult.words
-            });
-            
-            // Limpar imagem temporária
-            await fs.unlink(page.path).catch(() => {});
-        }
-        
-        return {
-            type: 'ocr',
-            pages: results,
-            totalText: results.map(r => r.text).join('\n\n')
-        };
-    }
+    // CÓDIGO LEGADO REMOVIDO (v2.0):
+    // - performOCR(): Método sequencial obsoleto (substituído por ocrWorker.js)
+    // - processPDF(): Processamento sequencial lento (substituído por processPDFParallel)
 
     // FASE 2: Processar PDF com Worker Threads Paralelos
     async processPDFParallel(pdfPath, progressCallback) {
