@@ -148,7 +148,24 @@ class OCRProcessor {
     // FASE 2: Processar PDF com Worker Threads Paralelos
     async processPDFParallel(pdfPath, progressCallback) {
         const pdfBuffer = await fs.readFile(pdfPath);
-        const pdfData = await pdfParse(pdfBuffer);
+
+        let pdfData;
+        try {
+            pdfData = await pdfParse(pdfBuffer);
+        } catch (error) {
+            // Verificar se é erro de senha
+            if (error.message && error.message.includes('password') || error.code === 1) {
+                throw new Error('🔒 Este PDF está protegido por senha.\n\n' +
+                    'Para processar este documento:\n' +
+                    '1. Abra o PDF em um leitor de PDF (Adobe Reader, Foxit, etc.)\n' +
+                    '2. Digite a senha para desbloqueá-lo\n' +
+                    '3. Salve uma cópia sem proteção: Arquivo → Salvar Como\n' +
+                    '4. Use a cópia sem senha neste sistema\n\n' +
+                    'Nota: A proteção por senha não pode ser removida por este sistema.');
+            }
+            // Se não for erro de senha, propagar erro original
+            throw error;
+        }
 
         // CORREÇÃO CRÍTICA: Removida verificação de texto nativo
         // Motivo: PDFs mistos (digital + escaneado) eram ignorados
@@ -175,9 +192,9 @@ class OCRProcessor {
                 density: 300,
                 savename: `page_${timestamp}`,
                 savedir: tempDir,
-                format: 'png',
-                width: 2480,
-                height: 3508
+                format: 'png'
+                // CORREÇÃO: Removido width/height fixos para suportar qualquer tamanho/orientação
+                // Agora o pdf2pic renderiza no tamanho real da página baseado na density
             });
 
             // Converter páginas sequencialmente para evitar sobrecarga
@@ -252,7 +269,9 @@ Erro original: ${error.message}`);
                                 pageNum,
                                 text: msg.data.text,
                                 confidence: msg.data.confidence,
-                                words: msg.data.words
+                                words: msg.data.words,
+                                imageWidth: msg.data.imageWidth,   // Dimensões dinâmicas da imagem
+                                imageHeight: msg.data.imageHeight  // Para cálculo correto de escala
                             });
                         } else {
                             reject(new Error(msg.error));
@@ -320,18 +339,12 @@ Erro original: ${error.message}`);
 
     // Criar PDF pesquisável com layout preservado
     async createSearchablePDF(originalPdfPath, ocrResults) {
-        // CORREÇÃO: Definir dimensões exatas da imagem usada no OCR
-        // Estas são as dimensões configuradas em pdf2pic (linhas 160-165)
-        const IMAGE_WIDTH = 2480;
-        const IMAGE_HEIGHT = 3508;
-
         const existingPdfBytes = await fs.readFile(originalPdfPath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         const pages = pdfDoc.getPages();
 
         console.log('📄 Gerando PDF pesquisável com layout preservado...', {
-            pages: ocrResults.pages.length,
-            imageResolution: `${IMAGE_WIDTH}x${IMAGE_HEIGHT}`
+            pages: ocrResults.pages.length
         });
 
         // Adicionar camada de texto invisível com coordenadas corretas
@@ -343,14 +356,26 @@ Erro original: ${error.message}`);
             console.log(`📄 Página ${i + 1}:`, {
                 hasWords: !!pageData.words,
                 wordCount: pageData.words ? pageData.words.length : 0,
-                sampleWord: pageData.words && pageData.words[0] ? pageData.words[0] : null
+                sampleWord: pageData.words && pageData.words[0] ? pageData.words[0] : null,
+                imageDimensions: pageData.imageWidth && pageData.imageHeight
+                    ? `${pageData.imageWidth}x${pageData.imageHeight}`
+                    : 'N/A'
             });
 
             // Se temos coordenadas de palavras, usar posicionamento preciso
             if (pageData.words && pageData.words.length > 0) {
-                // CORREÇÃO: Calcular fatores de escala corretos
-                // Converter coordenadas da imagem OCR (IMAGE_WIDTH x IMAGE_HEIGHT)
-                // para coordenadas do PDF (pdfWidth x pdfHeight)
+                // CORREÇÃO CRÍTICA: Usar dimensões DINÂMICAS da imagem OCR
+                // Cada página pode ter tamanho diferente (A4, Ofício, Paisagem, etc)
+                const IMAGE_WIDTH = pageData.imageWidth;
+                const IMAGE_HEIGHT = pageData.imageHeight;
+
+                // Verificar se temos as dimensões (proteção contra dados antigos)
+                if (!IMAGE_WIDTH || !IMAGE_HEIGHT) {
+                    console.warn(`⚠️ Página ${i + 1}: dimensões da imagem não disponíveis, pulando`);
+                    continue;
+                }
+
+                // Converter coordenadas da imagem OCR para coordenadas do PDF
                 const scaleX = pdfWidth / IMAGE_WIDTH;
                 const scaleY = pdfHeight / IMAGE_HEIGHT;
 
