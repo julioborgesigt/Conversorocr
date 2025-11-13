@@ -715,13 +715,31 @@
                     }
                 },
 
-                // FASE 1 & 2: Renderizar páginas em paralelo
+                // FASE 1 & 2: Renderizar páginas com melhorias de qualidade
                 async renderPagesForOCR() {
                     const pages = [];
+                    let nativeTextPages = 0;
 
-                    this.progressMessage = 'Renderizando páginas...';
+                    this.progressMessage = 'Analisando páginas...';
 
                     for (let pageNum = 1; pageNum <= this.totalPages; pageNum++) {
+                        // MELHORIA 1: Verificar se há texto nativo (evita OCR!)
+                        const nativeText = await this.checkNativeText(pageNum);
+
+                        if (nativeText) {
+                            // Página tem texto nativo, não precisa OCR!
+                            pages.push({
+                                pageNum,
+                                canvas: null,
+                                nativeText: nativeText,
+                                skipOCR: true
+                            });
+                            nativeTextPages++;
+                            this.progress = (pageNum / this.totalPages) * 20;
+                            continue;
+                        }
+
+                        // Precisa fazer OCR, renderizar a página
                         const page = await this.pdfDocument.getPage(pageNum);
                         const viewport = page.getViewport({ scale: 2 });
 
@@ -735,15 +753,20 @@
                             viewport: viewport
                         }).promise;
 
-                        // Aplicar pré-processamento otimizado
-                        const enhancedCanvas = await this.enhanceImageOptimized(canvas);
+                        // MELHORIA 7: Aplicar pré-processamento AVANÇADO
+                        const enhancedCanvas = await this.enhanceImageAdvanced(canvas);
 
                         pages.push({
                             pageNum,
-                            canvas: enhancedCanvas
+                            canvas: enhancedCanvas,
+                            skipOCR: false
                         });
 
                         this.progress = (pageNum / this.totalPages) * 20; // 20% para renderização
+                    }
+
+                    if (nativeTextPages > 0) {
+                        console.log(`✅ ${nativeTextPages} páginas com texto nativo detectadas (OCR pulado!)`);
                     }
 
                     return pages;
@@ -797,7 +820,8 @@
                                 }
                             });
 
-                            await worker.setParameters(this.getTesseractParams());
+                            // MELHORIA 6: Usar parâmetros otimizados por modo
+                            await worker.setParameters(this.getOptimizedTesseractParams());
                             scheduler.addWorker(worker);
                             workers.push(worker);
                         }
@@ -815,17 +839,32 @@
                             this.progressMessage = `Processando: ${pagesProcessed}/${this.totalPages} páginas (${this.performanceMetrics.pagesPerSecond} pág/s)`;
                         };
 
-                        // FASE 1: Processar todas as páginas em paralelo
-                        const jobs = pages.map(({ pageNum, canvas }) =>
-                            scheduler.addJob('recognize', canvas).then(result => {
+                        // MELHORIA 1 & FASE 1: Processar páginas (com texto nativo ou OCR)
+                        const jobs = pages.map(({ pageNum, canvas, nativeText, skipOCR }) => {
+                            if (skipOCR && nativeText) {
+                                // Página tem texto nativo, retornar direto!
                                 updateMetrics();
+                                return Promise.resolve({
+                                    pageNum,
+                                    text: nativeText,
+                                    confidence: 100,
+                                    native: true
+                                });
+                            }
+
+                            // Processar com OCR em paralelo
+                            return scheduler.addJob('recognize', canvas).then(result => {
+                                updateMetrics();
+                                // MELHORIA 5: Aplicar pós-processamento
+                                const processedText = this.postProcessText(result.data.text);
                                 return {
                                     pageNum,
-                                    text: result.data.text,
-                                    confidence: result.data.confidence
+                                    text: processedText,
+                                    confidence: result.data.confidence,
+                                    native: false
                                 };
-                            })
-                        );
+                            });
+                        });
 
                         // Aguardar todos os jobs completarem
                         this.extractedPages = await Promise.all(jobs);
@@ -886,7 +925,287 @@
                         console.warn('Não foi possível salvar no cache:', e);
                     }
                 },
-                
+
+                // ======= MELHORIAS DE QUALIDADE E VELOCIDADE =======
+
+                // MELHORIA 1: Detecção de Texto Nativo (VELOCIDADE ⭐⭐⭐⭐⭐)
+                async checkNativeText(pageNum) {
+                    try {
+                        const page = await this.pdfDocument.getPage(pageNum);
+                        const textContent = await page.getTextContent();
+                        const text = textContent.items.map(item => item.str).join(' ').trim();
+
+                        // Se a página tem mais de 50 caracteres de texto nativo, não precisa OCR
+                        return text.length > 50 ? text : null;
+                    } catch (e) {
+                        return null;
+                    }
+                },
+
+                // MELHORIA 2: Binarização Adaptativa com Otsu (QUALIDADE ⭐⭐⭐⭐⭐)
+                applyOtsuBinarization(imageData) {
+                    const data = imageData.data;
+                    const len = data.length;
+
+                    // Converter para grayscale
+                    const grayPixels = [];
+                    for (let i = 0; i < len; i += 4) {
+                        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        grayPixels.push(gray);
+                    }
+
+                    // Calcular histograma
+                    const histogram = new Array(256).fill(0);
+                    for (const gray of grayPixels) {
+                        histogram[Math.floor(gray)]++;
+                    }
+
+                    // Método de Otsu para encontrar threshold ideal
+                    const total = grayPixels.length;
+                    let sum = 0;
+                    for (let i = 0; i < 256; i++) {
+                        sum += i * histogram[i];
+                    }
+
+                    let sumB = 0;
+                    let wB = 0;
+                    let wF = 0;
+                    let maxVariance = 0;
+                    let threshold = 0;
+
+                    for (let i = 0; i < 256; i++) {
+                        wB += histogram[i];
+                        if (wB === 0) continue;
+
+                        wF = total - wB;
+                        if (wF === 0) break;
+
+                        sumB += i * histogram[i];
+                        const mB = sumB / wB;
+                        const mF = (sum - sumB) / wF;
+                        const variance = wB * wF * (mB - mF) * (mB - mF);
+
+                        if (variance > maxVariance) {
+                            maxVariance = variance;
+                            threshold = i;
+                        }
+                    }
+
+                    // Aplicar threshold encontrado
+                    for (let i = 0, j = 0; i < len; i += 4, j++) {
+                        const binary = grayPixels[j] > threshold ? 255 : 0;
+                        data[i] = data[i + 1] = data[i + 2] = binary;
+                    }
+
+                    return imageData;
+                },
+
+                // MELHORIA 3: Remoção de Ruído Avançada (QUALIDADE ⭐⭐⭐⭐)
+                removeNoiseAdvanced(imageData) {
+                    const data = imageData.data;
+                    const width = imageData.width;
+                    const height = imageData.height;
+
+                    // Filtro de mediana 3x3 (remove ruído salt-and-pepper)
+                    const output = new Uint8ClampedArray(data);
+
+                    for (let y = 1; y < height - 1; y++) {
+                        for (let x = 1; x < width - 1; x++) {
+                            const neighbors = [];
+
+                            // Coletar vizinhos 3x3
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const idx = ((y + dy) * width + (x + dx)) * 4;
+                                    neighbors.push(data[idx]);
+                                }
+                            }
+
+                            // Mediana
+                            neighbors.sort((a, b) => a - b);
+                            const median = neighbors[4];
+
+                            const idx = (y * width + x) * 4;
+                            output[idx] = output[idx + 1] = output[idx + 2] = median;
+                        }
+                    }
+
+                    // Copiar de volta
+                    for (let i = 0; i < data.length; i++) {
+                        data[i] = output[i];
+                    }
+
+                    return imageData;
+                },
+
+                // MELHORIA 4: Detecção e Correção de Orientação (QUALIDADE ⭐⭐⭐⭐)
+                async detectAndCorrectOrientation(canvas) {
+                    // Criar worker temporário apenas para detectar orientação
+                    const detector = await Tesseract.createWorker(this.ocrLanguage, 1, {
+                        logger: () => {} // Silenciar
+                    });
+
+                    const result = await detector.recognize(canvas);
+                    const orientation = result.data.orientation;
+
+                    await detector.terminate();
+
+                    // Se rotação detectada, corrigir
+                    if (orientation && orientation.confidence > 0.5 && orientation.degrees !== 0) {
+                        const rotated = document.createElement('canvas');
+                        const ctx = rotated.getContext('2d');
+
+                        if (orientation.degrees === 90 || orientation.degrees === 270) {
+                            rotated.width = canvas.height;
+                            rotated.height = canvas.width;
+                        } else {
+                            rotated.width = canvas.width;
+                            rotated.height = canvas.height;
+                        }
+
+                        ctx.translate(rotated.width / 2, rotated.height / 2);
+                        ctx.rotate((orientation.degrees * Math.PI) / 180);
+                        ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+
+                        return rotated;
+                    }
+
+                    return canvas;
+                },
+
+                // MELHORIA 5: Pós-processamento de Texto (QUALIDADE ⭐⭐⭐)
+                postProcessText(text) {
+                    if (!text) return text;
+
+                    // Correções comuns de OCR em português
+                    const corrections = {
+                        // Confusões comuns
+                        'rn': 'm',     // "bem" lido como "bern"
+                        '|': 'l',      // pipe confundido com L
+                        '0': 'o',      // zero confundido com O (em palavras)
+                        '1': 'l',      // um confundido com l (em palavras)
+                        '5': 's',      // cinco confundido com S
+                        // Espaçamentos
+                        /\s+/g: ' ',   // múltiplos espaços
+                        /\n{3,}/g: '\n\n', // múltiplas linhas vazias
+                    };
+
+                    let processed = text;
+
+                    // Aplicar correções em contexto de palavras
+                    processed = processed.replace(/([a-z])0([a-z])/gi, '$1o$2'); // o em palavras
+                    processed = processed.replace(/([a-z])1([a-z])/gi, '$1l$2'); // l em palavras
+                    processed = processed.replace(/\s+/g, ' '); // espaços múltiplos
+                    processed = processed.replace(/\n{3,}/g, '\n\n'); // linhas múltiplas
+
+                    // Remover espaços antes de pontuação
+                    processed = processed.replace(/\s+([.,;:!?])/g, '$1');
+
+                    // Capitalizar após pontos
+                    processed = processed.replace(/\.\s+([a-z])/g, (match, letter) =>
+                        '. ' + letter.toUpperCase()
+                    );
+
+                    return processed.trim();
+                },
+
+                // MELHORIA 6: Parâmetros Otimizados por Modo
+                getOptimizedTesseractParams() {
+                    const baseParams = {
+                        tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
+                        preserve_interword_spaces: '1',
+                    };
+
+                    if (this.ocrMode === 'fast') {
+                        // Modo Turbo: sacrifica um pouco de qualidade por velocidade
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '3', // Fast neural net
+                            tessedit_pageseg_mode: '6',    // Bloco uniforme
+                            edges_max_children_per_outline: '10',
+                        };
+                    } else if (this.ocrMode === 'accurate') {
+                        // Modo Balanceado: melhor custo-benefício
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '1', // LSTM only
+                            textord_heavy_nr: '1',         // Remoção de ruído
+                        };
+                    } else if (this.ocrMode === 'best') {
+                        // Modo Máxima Qualidade: todas as otimizações
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '1',
+                            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÄÇÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜàáâãäçèéêëìíîïòóôõöùúûü .,;:!?-/()"\'',
+                            textord_heavy_nr: '1',
+                            classify_bln_numeric_mode: '0',
+                        };
+                    }
+
+                    return baseParams;
+                },
+
+                // MELHORIA 7: Pré-processamento Completo e Otimizado
+                async enhanceImageAdvanced(canvas) {
+                    if (!this.enhanceImage) return canvas;
+
+                    const context = canvas.getContext('2d');
+                    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+                    // 1. Remover ruído primeiro
+                    imageData = this.removeNoiseAdvanced(imageData);
+
+                    // 2. Aplicar binarização adaptativa (Otsu)
+                    imageData = this.applyOtsuBinarization(imageData);
+
+                    // 3. Aplicar sharpening leve
+                    const sharpened = this.applySharpen(imageData);
+
+                    context.putImageData(sharpened, 0, 0);
+
+                    return canvas;
+                },
+
+                applySharpen(imageData) {
+                    // Kernel de sharpening
+                    const kernel = [
+                        0, -1, 0,
+                        -1, 5, -1,
+                        0, -1, 0
+                    ];
+
+                    return this.applyConvolution(imageData, kernel);
+                },
+
+                applyConvolution(imageData, kernel) {
+                    const data = imageData.data;
+                    const width = imageData.width;
+                    const height = imageData.height;
+                    const output = new Uint8ClampedArray(data);
+
+                    for (let y = 1; y < height - 1; y++) {
+                        for (let x = 1; x < width - 1; x++) {
+                            let sum = 0;
+
+                            for (let ky = 0; ky < 3; ky++) {
+                                for (let kx = 0; kx < 3; kx++) {
+                                    const idx = ((y + ky - 1) * width + (x + kx - 1)) * 4;
+                                    sum += data[idx] * kernel[ky * 3 + kx];
+                                }
+                            }
+
+                            const idx = (y * width + x) * 4;
+                            const value = Math.max(0, Math.min(255, sum));
+                            output[idx] = output[idx + 1] = output[idx + 2] = value;
+                        }
+                    }
+
+                    // Criar novo ImageData e copiar dados processados
+                    const result = new ImageData(width, height);
+                    result.data.set(output);
+                    return result;
+                },
+
                 getTesseractParams() {
                     const params = {
                         tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
