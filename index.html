@@ -430,11 +430,14 @@
                         this.progress = 100;
                         this.showMessage('✅ OCR concluído com sucesso!', 'success');
 
+                        // CORREÇÃO: Mover processing = false para o final do try
+                        // (estava no finally, sendo executado antes do fetch terminar)
+                        this.processing = false;
+
                     } catch (error) {
                         console.error('Erro no OCR:', error);
                         this.showMessage('Erro no processamento: ' + error.message, 'error');
-                    } finally {
-                        this.processing = false;
+                        this.processing = false; // Manter aqui também para caso de erro
                     }
                 },
 
