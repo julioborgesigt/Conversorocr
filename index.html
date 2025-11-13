@@ -848,7 +848,8 @@
                                     pageNum,
                                     text: nativeText,
                                     confidence: 100,
-                                    native: true
+                                    native: true,
+                                    words: [] // Sem coordenadas para texto nativo
                                 });
                             }
 
@@ -861,7 +862,10 @@
                                     pageNum,
                                     text: processedText,
                                     confidence: result.data.confidence,
-                                    native: false
+                                    native: false,
+                                    // CORREÇÃO: Armazenar dados de palavras com coordenadas
+                                    words: result.data.words || [],
+                                    lines: result.data.lines || []
                                 };
                             });
                         });
@@ -1261,54 +1265,123 @@
                     this.wordCount = this.extractedText.split(/\s+/).filter(word => word.length > 0).length;
                 },
                 
+                // CORREÇÃO DO BUG: PDF Pesquisável com Layout Preservado
                 async downloadSearchablePDF() {
                     try {
+                        this.processing = true;
+                        this.progressMessage = 'Gerando PDF pesquisável...';
+
                         const { jsPDF } = window.jspdf;
-                        const pdf = new jsPDF();
-                        
-                        // Adicionar cada página com texto invisível (searchable)
+
+                        // Processar primeira página para determinar dimensões
+                        const firstPage = await this.pdfDocument.getPage(1);
+                        const firstViewport = firstPage.getViewport({ scale: 1 });
+
+                        // Criar PDF com dimensões corretas (pt = pontos, 72 DPI)
+                        const pdfWidth = firstViewport.width * 0.75; // Converter pixels para pontos
+                        const pdfHeight = firstViewport.height * 0.75;
+
+                        const pdf = new jsPDF({
+                            orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
+                            unit: 'pt',
+                            format: [pdfWidth, pdfHeight]
+                        });
+
+                        // Processar cada página
                         for (let i = 0; i < this.extractedPages.length; i++) {
-                            if (i > 0) pdf.addPage();
-                            
+                            if (i > 0) pdf.addPage([pdfWidth, pdfHeight]);
+
+                            this.progress = ((i + 1) / this.extractedPages.length) * 100;
+                            this.progressMessage = `Gerando página ${i + 1}/${this.extractedPages.length}...`;
+
                             // Renderizar imagem da página original
                             const page = await this.pdfDocument.getPage(i + 1);
                             const viewport = page.getViewport({ scale: 2 });
-                            
+
                             const canvas = document.createElement('canvas');
                             const context = canvas.getContext('2d');
                             canvas.height = viewport.height;
                             canvas.width = viewport.width;
-                            
+
                             await page.render({
                                 canvasContext: context,
                                 viewport: viewport
                             }).promise;
-                            
-                            // Adicionar imagem ao PDF
+
+                            // Adicionar imagem da página
                             const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                            pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
-                            
-                            // Adicionar texto invisível para tornar pesquisável
-                            pdf.setTextColor(255, 255, 255);
-                            pdf.setFontSize(1);
-                            
-                            const lines = this.extractedPages[i].text.split('\n');
-                            let y = 10;
-                            for (const line of lines) {
-                                if (line.trim()) {
-                                    pdf.text(line, 10, y);
-                                    y += 5;
-                                    if (y > 280) break;
+                            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, '', 'FAST');
+
+                            // CORREÇÃO: Adicionar texto com posicionamento correto
+                            const pageData = this.extractedPages[i];
+
+                            if (pageData.words && pageData.words.length > 0) {
+                                // Calcular fator de escala (coordenadas OCR -> coordenadas PDF)
+                                const scaleX = pdfWidth / viewport.width;
+                                const scaleY = pdfHeight / viewport.height;
+
+                                // Definir texto como invisível (transparente)
+                                pdf.setTextColor(255, 255, 255);
+                                pdf.setGState(new pdf.GState({ opacity: 0 }));
+
+                                // Posicionar cada palavra nas coordenadas corretas
+                                for (const word of pageData.words) {
+                                    if (!word.text || !word.bbox) continue;
+
+                                    // Coordenadas da palavra (bbox = bounding box)
+                                    const bbox = word.bbox;
+                                    const x = bbox.x0 * scaleX;
+                                    const y = bbox.y0 * scaleY;
+                                    const wordWidth = (bbox.x1 - bbox.x0) * scaleX;
+                                    const wordHeight = (bbox.y1 - bbox.y0) * scaleY;
+
+                                    // Calcular tamanho da fonte baseado na altura da palavra
+                                    let fontSize = wordHeight * 0.8; // 80% da altura para não ficar muito grande
+
+                                    // Limitar tamanho da fonte
+                                    fontSize = Math.max(4, Math.min(fontSize, 72));
+
+                                    pdf.setFontSize(fontSize);
+
+                                    // Adicionar palavra na posição exata
+                                    // Usar renderingMode 3 = invisível mas selecionável
+                                    pdf.text(word.text, x, y + wordHeight, {
+                                        baseline: 'bottom',
+                                        renderingMode: 'invisible'
+                                    });
+                                }
+
+                                // Restaurar opacidade normal
+                                pdf.setGState(new pdf.GState({ opacity: 1 }));
+                            } else {
+                                // Fallback: se não tem coordenadas, usar método antigo
+                                // (para páginas com texto nativo)
+                                console.warn(`Página ${i + 1}: sem dados de coordenadas, usando fallback`);
+
+                                pdf.setTextColor(255, 255, 255);
+                                pdf.setFontSize(8);
+
+                                const lines = pageData.text.split('\n');
+                                let y = 20;
+                                for (const line of lines) {
+                                    if (line.trim()) {
+                                        pdf.text(line, 10, y);
+                                        y += 10;
+                                        if (y > pdfHeight - 20) break;
+                                    }
                                 }
                             }
                         }
-                        
+
                         // Salvar PDF
-                        const fileName = this.pdfFile.name.replace('.pdf', '_OCR.pdf');
+                        const fileName = this.pdfFile.name.replace('.pdf', '_OCR_Pesquisavel.pdf');
                         pdf.save(fileName);
-                        
-                        this.showMessage('PDF pesquisável baixado com sucesso!', 'success');
+
+                        this.processing = false;
+                        this.showMessage('✅ PDF pesquisável com layout preservado gerado com sucesso!', 'success');
                     } catch (error) {
+                        console.error('Erro ao gerar PDF:', error);
+                        this.processing = false;
                         this.showMessage('Erro ao gerar PDF: ' + error.message, 'error');
                     }
                 },
