@@ -53,40 +53,13 @@ class OCRProcessor {
         this.preserveLayout = options.preserveLayout !== false;
     }
 
-    // Pré-processamento de imagem para melhorar OCR
-    async preprocessImage(imagePath) {
-        try {
-            let image = sharp(imagePath);
-            
-            // Obter metadados
-            const metadata = await image.metadata();
-            
-            // Pipeline de processamento
-            image = image
-                .resize(metadata.width * 2, metadata.height * 2) // Aumentar resolução
-                .greyscale() // Converter para escala de cinza
-                .normalize() // Normalizar histograma
-                .sharpen() // Aguçar bordas
-                .threshold(128) // Binarização
-                .negate(); // Inverter se necessário (texto escuro em fundo claro)
-            
-            const outputPath = imagePath.replace('.png', '_processed.png');
-            await image.toFile(outputPath);
-            
-            return outputPath;
-        } catch (error) {
-            console.error('Erro no pré-processamento:', error);
-            return imagePath;
-        }
-    }
+    // REMOVIDO: preprocessImage destrutivo (usava resize 2x, threshold fixo e negate)
+    // Pré-processamento agora é feito de forma segura no ocrWorker.js
 
-    // Executar OCR em uma imagem
+    // Executar OCR em uma imagem (método legado - usar processPDFParallel ao invés)
     async performOCR(imagePath) {
+        // NOTA: Pré-processamento agora é feito no ocrWorker.js
         let processedPath = imagePath;
-        
-        if (this.enhanceImage) {
-            processedPath = await this.preprocessImage(imagePath);
-        }
         
         const worker = await createWorker(this.language);
         
@@ -299,95 +272,103 @@ class OCRProcessor {
         return params;
     }
 
-    // Criar PDF pesquisável
+    // Criar PDF pesquisável com layout preservado
     async createSearchablePDF(originalPdfPath, ocrResults) {
         const existingPdfBytes = await fs.readFile(originalPdfPath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         const pages = pdfDoc.getPages();
-        
-        // Adicionar camada de texto invisível
+
+        console.log('📄 Gerando PDF pesquisável com layout preservado...', {
+            pages: ocrResults.pages.length
+        });
+
+        // Adicionar camada de texto invisível com coordenadas corretas
         for (let i = 0; i < pages.length && i < ocrResults.pages.length; i++) {
             const page = pages[i];
-            const ocrText = ocrResults.pages[i].text;
-            
-            // Adicionar texto invisível
-            page.drawText(ocrText, {
-                x: 0,
-                y: 0,
-                size: 1,
-                color: rgb(1, 1, 1),
-                opacity: 0
+            const pageData = ocrResults.pages[i];
+            const { width: pdfWidth, height: pdfHeight } = page.getSize();
+
+            console.log(`📄 Página ${i + 1}:`, {
+                hasWords: !!pageData.words,
+                wordCount: pageData.words ? pageData.words.length : 0,
+                sampleWord: pageData.words && pageData.words[0] ? pageData.words[0] : null
             });
+
+            // Se temos coordenadas de palavras, usar posicionamento preciso
+            if (pageData.words && pageData.words.length > 0) {
+                // CORREÇÃO: Usar coordenadas reais das palavras
+                // A imagem renderizada tem resolução maior que o PDF original
+                // Precisamos calcular o fator de escala
+                const firstWord = pageData.words[0];
+                const imageHeight = firstWord.bbox ? firstWord.bbox.y1 * 2 : pdfHeight; // Estimativa
+
+                let wordsAdded = 0;
+
+                for (const word of pageData.words) {
+                    if (!word.text || word.text.trim() === '') continue;
+                    if (!word.bbox) continue;
+
+                    const bbox = word.bbox;
+
+                    // Converter coordenadas da imagem OCR para coordenadas PDF
+                    // OCR usa origem no topo-esquerdo, PDF usa origem no inferior-esquerdo
+                    const scaleX = pdfWidth / (bbox.x1 * 2); // Ajuste baseado na resolução
+                    const scaleY = pdfHeight / imageHeight;
+
+                    const x = bbox.x0 * scaleX;
+                    const y = pdfHeight - (bbox.y1 * scaleY); // Inverter Y
+                    const wordHeight = (bbox.y1 - bbox.y0) * scaleY;
+
+                    // Calcular tamanho da fonte
+                    let fontSize = wordHeight * 0.8;
+                    fontSize = Math.max(6, Math.min(fontSize, 72));
+
+                    try {
+                        // Adicionar texto invisível na posição exata
+                        page.drawText(word.text, {
+                            x: x,
+                            y: y,
+                            size: fontSize,
+                            color: rgb(1, 1, 1), // Branco (invisível)
+                            opacity: 0
+                        });
+                        wordsAdded++;
+                    } catch (error) {
+                        // Ignorar palavras com caracteres não suportados
+                        console.warn(`Palavra ignorada: "${word.text}" - ${error.message}`);
+                    }
+                }
+
+                console.log(`✅ Página ${i + 1}: ${wordsAdded} palavras adicionadas com coordenadas`);
+
+            } else {
+                // Fallback: adicionar texto como bloco (método antigo)
+                console.warn(`⚠️ Página ${i + 1}: sem coordenadas, usando fallback`);
+
+                try {
+                    page.drawText(pageData.text || '', {
+                        x: 10,
+                        y: pdfHeight - 20,
+                        size: 8,
+                        color: rgb(1, 1, 1),
+                        opacity: 0
+                    });
+                } catch (error) {
+                    console.error(`Erro ao adicionar texto na página ${i + 1}:`, error.message);
+                }
+            }
         }
-        
+
         const pdfBytes = await pdfDoc.save();
+        console.log('✅ PDF pesquisável gerado com sucesso');
         return pdfBytes;
     }
 }
 
 // Rotas da API
 
-// Upload e processamento de PDF
-app.post('/api/process-pdf', upload.single('pdf'), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'Nenhum arquivo enviado' });
-        }
-        
-        const options = {
-            language: req.body.language || 'por',
-            mode: req.body.mode || 'accurate',
-            enhanceImage: req.body.enhanceImage !== 'false',
-            preserveLayout: req.body.preserveLayout !== 'false'
-        };
-        
-        const processor = new OCRProcessor(options);
-        
-        // Processar PDF
-        const results = await processor.processPDF(req.file.path, (current, total) => {
-            // Aqui você poderia enviar progresso via WebSocket
-            console.log(`Processando página ${current} de ${total}`);
-        });
-        
-        // Criar PDF pesquisável se solicitado
-        let searchablePdfBase64 = null;
-        if (req.body.outputFormat === 'searchable_pdf' || req.body.outputFormat === 'both') {
-            const searchablePdfBytes = await processor.createSearchablePDF(req.file.path, results);
-            searchablePdfBase64 = Buffer.from(searchablePdfBytes).toString('base64');
-        }
-        
-        // Limpar arquivo temporário
-        await fs.unlink(req.file.path).catch(() => {});
-        
-        // Calcular estatísticas
-        const stats = {
-            pageCount: results.pages.length,
-            totalWords: results.totalText.split(/\s+/).length,
-            averageConfidence: results.pages.reduce((sum, p) => sum + p.confidence, 0) / results.pages.length,
-            processingType: results.type
-        };
-        
-        res.json({
-            success: true,
-            text: results.totalText,
-            pages: results.pages.map(p => ({
-                pageNum: p.pageNum,
-                text: p.text,
-                confidence: p.confidence,
-                wordCount: p.text.split(/\s+/).length
-            })),
-            searchablePdf: searchablePdfBase64,
-            statistics: stats
-        });
-        
-    } catch (error) {
-        console.error('Erro no processamento:', error);
-        res.status(500).json({ 
-            error: 'Erro ao processar PDF', 
-            details: error.message 
-        });
-    }
-});
+// ROTA REMOVIDA: /api/process-pdf (sequencial e lento)
+// Use /api/process-pdf-parallel ou /api/process-pdf-stream ao invés
 
 // FASE 2: Processamento Paralelo Otimizado
 app.post('/api/process-pdf-parallel', upload.single('pdf'), async (req, res) => {

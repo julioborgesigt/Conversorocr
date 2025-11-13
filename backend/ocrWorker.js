@@ -12,10 +12,11 @@ const fs = require('fs').promises;
         let processedPath = imagePath;
         if (enhanceImage) {
             processedPath = imagePath.replace('.png', '_enhanced.png');
+            // Pipeline otimizada e segura de pré-processamento
             await sharp(imagePath)
-                .greyscale()
-                .normalize()
-                .sharpen()
+                .greyscale()       // Converter para escala de cinza
+                .normalize()       // Melhorar contraste (adaptativo, melhor que threshold fixo)
+                .sharpen(1)        // Adicionar nitidez moderada
                 .toFile(processedPath);
         }
 
