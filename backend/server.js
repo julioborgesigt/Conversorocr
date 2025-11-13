@@ -148,7 +148,24 @@ class OCRProcessor {
     // FASE 2: Processar PDF com Worker Threads Paralelos
     async processPDFParallel(pdfPath, progressCallback) {
         const pdfBuffer = await fs.readFile(pdfPath);
-        const pdfData = await pdfParse(pdfBuffer);
+
+        let pdfData;
+        try {
+            pdfData = await pdfParse(pdfBuffer);
+        } catch (error) {
+            // Verificar se é erro de senha
+            if (error.message && error.message.includes('password') || error.code === 1) {
+                throw new Error('🔒 Este PDF está protegido por senha.\n\n' +
+                    'Para processar este documento:\n' +
+                    '1. Abra o PDF em um leitor de PDF (Adobe Reader, Foxit, etc.)\n' +
+                    '2. Digite a senha para desbloqueá-lo\n' +
+                    '3. Salve uma cópia sem proteção: Arquivo → Salvar Como\n' +
+                    '4. Use a cópia sem senha neste sistema\n\n' +
+                    'Nota: A proteção por senha não pode ser removida por este sistema.');
+            }
+            // Se não for erro de senha, propagar erro original
+            throw error;
+        }
 
         // CORREÇÃO CRÍTICA: Removida verificação de texto nativo
         // Motivo: PDFs mistos (digital + escaneado) eram ignorados
