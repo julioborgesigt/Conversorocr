@@ -511,7 +511,7 @@
                     
                     try {
                         const arrayBuffer = await file.arrayBuffer();
-                        this.pdfDocument = await pdfjsLib.getDocument(arrayBuffer).promise;
+                        this.pdfDocument = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
                         this.totalPages = this.pdfDocument.numPages;
                         this.currentPage = 1;
                         
