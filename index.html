@@ -1082,17 +1082,7 @@
                     if (!text) return text;
 
                     // Correções comuns de OCR em português
-                    const corrections = {
-                        // Confusões comuns
-                        'rn': 'm',     // "bem" lido como "bern"
-                        '|': 'l',      // pipe confundido com L
-                        '0': 'o',      // zero confundido com O (em palavras)
-                        '1': 'l',      // um confundido com l (em palavras)
-                        '5': 's',      // cinco confundido com S
-                        // Espaçamentos
-                        /\s+/g: ' ',   // múltiplos espaços
-                        /\n{3,}/g: '\n\n', // múltiplas linhas vazias
-                    };
+                    // (Substituições de strings são feitas diretamente com replace abaixo)
 
                     let processed = text;
 
