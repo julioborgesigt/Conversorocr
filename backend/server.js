@@ -235,11 +235,11 @@ Erro original: ${error.message}`);
             const batch = imagePaths.slice(i, i + batchSize);
 
             // Criar workers para este lote
-            const workerPromises = batch.map(({ pageNum, path }) => {
+            const workerPromises = batch.map(({ pageNum, path: imagePath }) => {
                 return new Promise((resolve, reject) => {
                     const worker = new Worker(path.join(__dirname, 'ocrWorker.js'), {
                         workerData: {
-                            imagePath: path,
+                            imagePath: imagePath,
                             language: this.language,
                             params: params,
                             enhanceImage: this.enhanceImage
