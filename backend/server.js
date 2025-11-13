@@ -1,4 +1,4 @@
-// server.js - Backend Node.js para OCR Avançado de PDFs
+// server.js - Backend Node.js para OCR Avançado de PDFs com Processamento Paralelo
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -9,6 +9,8 @@ const sharp = require('sharp');
 const { PDFDocument, rgb } = require('pdf-lib');
 const pdfParse = require('pdf-parse');
 const cors = require('cors');
+const { Worker } = require('worker_threads');
+const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -170,6 +172,133 @@ class OCRProcessor {
         };
     }
 
+    // FASE 2: Processar PDF com Worker Threads Paralelos
+    async processPDFParallel(pdfPath, progressCallback) {
+        const pdfBuffer = await fs.readFile(pdfPath);
+        const pdfData = await pdfParse(pdfBuffer);
+
+        // Se o PDF já tem texto, retornar
+        if (pdfData.text && pdfData.text.trim().length > 100) {
+            return {
+                type: 'native_text',
+                pages: [{
+                    pageNum: 1,
+                    text: pdfData.text,
+                    confidence: 100
+                }],
+                totalText: pdfData.text
+            };
+        }
+
+        // Converter PDF em imagens
+        const pdf2pic = require('pdf2pic');
+        const converter = new pdf2pic.fromPath(pdfPath, {
+            density: 300,
+            savename: 'page',
+            savedir: './temp',
+            format: 'png',
+            width: 2480,
+            height: 3508
+        });
+
+        const pageCount = pdfData.numpages;
+        const imagePaths = [];
+
+        // Converter todas as páginas para imagens
+        for (let i = 1; i <= pageCount; i++) {
+            const page = await converter(i);
+            imagePaths.push({ pageNum: i, path: page.path });
+        }
+
+        // Detectar número de CPUs disponíveis
+        const numCPUs = os.cpus().length;
+        const batchSize = Math.max(1, Math.floor(numCPUs * 0.75)); // Usar 75% das CPUs
+
+        console.log(`🖥️ Processando ${pageCount} páginas com ${batchSize} workers paralelos`);
+
+        const results = [];
+        const params = this.getTesseractParams();
+
+        // Processar em lotes paralelos
+        for (let i = 0; i < imagePaths.length; i += batchSize) {
+            const batch = imagePaths.slice(i, i + batchSize);
+
+            // Criar workers para este lote
+            const workerPromises = batch.map(({ pageNum, path }) => {
+                return new Promise((resolve, reject) => {
+                    const worker = new Worker(path.join(__dirname, 'ocrWorker.js'), {
+                        workerData: {
+                            imagePath: path,
+                            language: this.language,
+                            params: params,
+                            enhanceImage: this.enhanceImage
+                        }
+                    });
+
+                    worker.on('message', (msg) => {
+                        if (msg.success) {
+                            resolve({
+                                pageNum,
+                                text: msg.data.text,
+                                confidence: msg.data.confidence,
+                                words: msg.data.words
+                            });
+                        } else {
+                            reject(new Error(msg.error));
+                        }
+                    });
+
+                    worker.on('error', reject);
+                    worker.on('exit', (code) => {
+                        if (code !== 0) {
+                            reject(new Error(`Worker stopped with exit code ${code}`));
+                        }
+                    });
+                });
+            });
+
+            // Aguardar lote completar
+            const batchResults = await Promise.all(workerPromises);
+            results.push(...batchResults);
+
+            // Callback de progresso
+            if (progressCallback) {
+                progressCallback(results.length, pageCount);
+            }
+
+            // Limpar imagens temporárias do lote
+            for (const { path } of batch) {
+                await fs.unlink(path).catch(() => {});
+            }
+        }
+
+        // Ordenar resultados por número de página
+        results.sort((a, b) => a.pageNum - b.pageNum);
+
+        return {
+            type: 'ocr_parallel',
+            pages: results,
+            totalText: results.map(r => r.text).join('\n\n'),
+            workers: batchSize
+        };
+    }
+
+    // Helper para obter parâmetros do Tesseract
+    getTesseractParams() {
+        const params = {
+            tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
+            preserve_interword_spaces: '1'
+        };
+
+        if (this.mode === 'fast') {
+            params.tessedit_ocr_engine_mode = '3';
+        } else if (this.mode === 'best') {
+            params.tessedit_ocr_engine_mode = '1';
+        }
+
+        return params;
+    }
+
     // Criar PDF pesquisável
     async createSearchablePDF(originalPdfPath, ocrResults) {
         const existingPdfBytes = await fs.readFile(originalPdfPath);
@@ -258,6 +387,150 @@ app.post('/api/process-pdf', upload.single('pdf'), async (req, res) => {
             details: error.message 
         });
     }
+});
+
+// FASE 2: Processamento Paralelo Otimizado
+app.post('/api/process-pdf-parallel', upload.single('pdf'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+        }
+
+        const options = {
+            language: req.body.language || 'por',
+            mode: req.body.mode || 'accurate',
+            enhanceImage: req.body.enhanceImage !== 'false',
+            preserveLayout: req.body.preserveLayout !== 'false'
+        };
+
+        const processor = new OCRProcessor(options);
+        const startTime = Date.now();
+
+        // Processar PDF com Worker Threads Paralelos
+        const results = await processor.processPDFParallel(req.file.path, (current, total) => {
+            console.log(`✓ Processadas ${current}/${total} páginas`);
+        });
+
+        const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+        // Criar PDF pesquisável se solicitado
+        let searchablePdfBase64 = null;
+        if (req.body.outputFormat === 'searchable_pdf' || req.body.outputFormat === 'both') {
+            const searchablePdfBytes = await processor.createSearchablePDF(req.file.path, results);
+            searchablePdfBase64 = Buffer.from(searchablePdfBytes).toString('base64');
+        }
+
+        // Limpar arquivo temporário
+        await fs.unlink(req.file.path).catch(() => {});
+
+        // Calcular estatísticas
+        const stats = {
+            pageCount: results.pages.length,
+            totalWords: results.totalText.split(/\s+/).length,
+            averageConfidence: results.pages.reduce((sum, p) => sum + p.confidence, 0) / results.pages.length,
+            processingType: results.type,
+            parallelWorkers: results.workers || 1,
+            processingTime: processingTime,
+            pagesPerSecond: (results.pages.length / parseFloat(processingTime)).toFixed(2)
+        };
+
+        res.json({
+            success: true,
+            text: results.totalText,
+            pages: results.pages.map(p => ({
+                pageNum: p.pageNum,
+                text: p.text,
+                confidence: p.confidence,
+                wordCount: p.text.split(/\s+/).length
+            })),
+            searchablePdf: searchablePdfBase64,
+            statistics: stats
+        });
+
+    } catch (error) {
+        console.error('Erro no processamento paralelo:', error);
+        res.status(500).json({
+            error: 'Erro ao processar PDF',
+            details: error.message
+        });
+    }
+});
+
+// FASE 3: Server-Sent Events para Streaming de Resultados
+app.post('/api/process-pdf-stream', upload.single('pdf'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+        }
+
+        // Configurar SSE
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const sendEvent = (event, data) => {
+            res.write(`event: ${event}\n`);
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+        };
+
+        const options = {
+            language: req.body.language || 'por',
+            mode: req.body.mode || 'accurate',
+            enhanceImage: req.body.enhanceImage !== 'false',
+            preserveLayout: req.body.preserveLayout !== 'false'
+        };
+
+        const processor = new OCRProcessor(options);
+        const startTime = Date.now();
+
+        sendEvent('start', { message: 'Iniciando processamento...' });
+
+        // Processar com callback de progresso
+        const results = await processor.processPDFParallel(req.file.path, (current, total) => {
+            sendEvent('progress', {
+                current,
+                total,
+                percentage: ((current / total) * 100).toFixed(1),
+                elapsed: ((Date.now() - startTime) / 1000).toFixed(1)
+            });
+        });
+
+        const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+        // Enviar resultado final
+        sendEvent('complete', {
+            success: true,
+            pages: results.pages,
+            totalText: results.totalText,
+            processingTime,
+            workers: results.workers
+        });
+
+        // Limpar arquivo temporário
+        await fs.unlink(req.file.path).catch(() => {});
+
+        res.end();
+
+    } catch (error) {
+        console.error('Erro no streaming:', error);
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+        res.end();
+    }
+});
+
+// Rota para obter informações do sistema
+app.get('/api/system-info', (req, res) => {
+    const cpus = os.cpus();
+    res.json({
+        cpuCores: cpus.length,
+        cpuModel: cpus[0].model,
+        totalMemory: (os.totalmem() / (1024 ** 3)).toFixed(2) + ' GB',
+        freeMemory: (os.freemem() / (1024 ** 3)).toFixed(2) + ' GB',
+        platform: os.platform(),
+        arch: os.arch(),
+        recommendedWorkers: Math.max(1, Math.floor(cpus.length * 0.75))
+    });
 });
 
 // Análise rápida de PDF

@@ -108,6 +108,51 @@
             background-color: #f44336;
             color: white;
         }
+
+        /* Performance Metrics Styles */
+        .performance-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            margin: 4px;
+        }
+
+        .performance-metric {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 8px 0;
+            border-left: 4px solid #2196f3;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .metric-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2196f3;
+        }
+
+        .resource-chip {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            margin: 2px;
+        }
     </style>
 </head>
 <body>
@@ -366,11 +411,58 @@
                                             </v-card>
                                         </v-col>
                                     </v-row>
+
+                                    <!-- FASE 3: Métricas de Performance -->
+                                    <v-divider class="my-4"></v-divider>
+                                    <div class="text-subtitle-1 mb-3">
+                                        <v-icon left>mdi-speedometer</v-icon>
+                                        Métricas de Performance
+                                    </div>
+                                    <v-row>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Velocidade de Processamento</div>
+                                                <div class="metric-value">{{ performanceMetrics.pagesPerSecond }} pág/s</div>
+                                            </div>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Workers Utilizados</div>
+                                                <div class="metric-value">{{ systemResources.workers }} workers</div>
+                                            </div>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Modo de Performance</div>
+                                                <div class="metric-value" style="font-size: 16px;">{{ systemResources.mode }}</div>
+                                            </div>
+                                        </v-col>
+                                    </v-row>
+
+                                    <!-- Recursos do Sistema -->
+                                    <div class="mt-4">
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-cpu-64-bit</v-icon>
+                                            {{ systemResources.cpuCores }} CPU Cores
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-memory</v-icon>
+                                            {{ systemResources.memoryGB }} GB RAM
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-flash</v-icon>
+                                            WebAssembly SIMD
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-cached</v-icon>
+                                            Cache Ativo
+                                        </span>
+                                    </div>
                                 </v-card-text>
                             </v-card>
                         </v-col>
                     </v-row>
-                    
+
                     <!-- Botão de Reset -->
                     <v-row v-if="pdfFile">
                         <v-col cols="12">
@@ -449,13 +541,26 @@
                     progress: 0,
                     progressMessage: '',
                     ocrCompleted: false,
-                    
+
                     // Resultados
                     extractedText: '',
                     extractedPages: [],
                     averageConfidence: 0,
                     wordCount: 0,
                     processingTime: 0,
+
+                    // Performance e recursos
+                    systemResources: {
+                        cpuCores: 4,
+                        workers: 4,
+                        memoryGB: 4,
+                        mode: 'auto'
+                    },
+                    performanceMetrics: {
+                        pagesProcessed: 0,
+                        pagesPerSecond: 0,
+                        estimatedTimeRemaining: 0
+                    },
                     
                     // UI
                     dragover: false,
@@ -554,76 +659,231 @@
                     
                     this.currentPageCanvas = canvas;
                 },
-                
+
+                // FASE 1: Detectar recursos do sistema
+                detectSystemResources() {
+                    const cpuCores = navigator.hardwareConcurrency || 4;
+                    const memoryGB = navigator.deviceMemory || 4;
+
+                    // Ajustar número de workers baseado nos recursos
+                    let workers, mode;
+
+                    if (cpuCores >= 8 && memoryGB >= 8) {
+                        workers = Math.min(cpuCores, 8); // Máximo de 8 workers
+                        mode = 'high-performance';
+                    } else if (cpuCores >= 4 && memoryGB >= 4) {
+                        workers = 4;
+                        mode = 'balanced';
+                    } else {
+                        workers = 2;
+                        mode = 'low-resource';
+                    }
+
+                    this.systemResources = {
+                        cpuCores,
+                        workers,
+                        memoryGB,
+                        mode
+                    };
+
+                    console.log('🖥️ Recursos detectados:', this.systemResources);
+                    return this.systemResources;
+                },
+
+                // FASE 2: Pré-processamento otimizado com OffscreenCanvas
+                async enhanceImageOptimized(canvas) {
+                    if (!this.enhanceImage) return canvas;
+
+                    try {
+                        // Usar OffscreenCanvas se disponível (mais rápido)
+                        const offscreen = new OffscreenCanvas(canvas.width, canvas.height);
+                        const ctx = offscreen.getContext('2d', {
+                            willReadFrequently: false,
+                            desynchronized: true
+                        });
+
+                        // Aplicar filtros usando GPU
+                        ctx.filter = 'contrast(1.5) brightness(1.1) grayscale(1)';
+                        ctx.drawImage(canvas, 0, 0);
+
+                        return offscreen;
+                    } catch (e) {
+                        // Fallback para método tradicional
+                        const context = canvas.getContext('2d');
+                        this.enhanceImageQuality(context, canvas.width, canvas.height);
+                        return canvas;
+                    }
+                },
+
+                // FASE 1 & 2: Renderizar páginas em paralelo
+                async renderPagesForOCR() {
+                    const pages = [];
+
+                    this.progressMessage = 'Renderizando páginas...';
+
+                    for (let pageNum = 1; pageNum <= this.totalPages; pageNum++) {
+                        const page = await this.pdfDocument.getPage(pageNum);
+                        const viewport = page.getViewport({ scale: 2 });
+
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+
+                        await page.render({
+                            canvasContext: context,
+                            viewport: viewport
+                        }).promise;
+
+                        // Aplicar pré-processamento otimizado
+                        const enhancedCanvas = await this.enhanceImageOptimized(canvas);
+
+                        pages.push({
+                            pageNum,
+                            canvas: enhancedCanvas
+                        });
+
+                        this.progress = (pageNum / this.totalPages) * 20; // 20% para renderização
+                    }
+
+                    return pages;
+                },
+
+                // FASE 1, 2 & 3: OCR Paralelo Otimizado com Múltiplos Workers
                 async startOCR() {
                     this.processing = true;
                     this.progress = 0;
                     this.extractedPages = [];
                     this.extractedText = '';
+                    this.performanceMetrics.pagesProcessed = 0;
                     const startTime = Date.now();
-                    
+
                     try {
-                        // Inicializar Tesseract
-                        this.progressMessage = 'Inicializando OCR...';
-                        const worker = await Tesseract.createWorker(this.ocrLanguage, 1, {
-                            logger: (m) => {
-                                if (m.status === 'recognizing text') {
-                                    this.progress = m.progress * 100;
-                                }
-                            }
-                        });
-                        
-                        // Configurar parâmetros do Tesseract baseado no modo
-                        await worker.setParameters(this.getTesseractParams());
-                        
-                        // Processar cada página
-                        for (let pageNum = 1; pageNum <= this.totalPages; pageNum++) {
-                            this.progressMessage = `Processando página ${pageNum} de ${this.totalPages}...`;
-                            this.progress = ((pageNum - 1) / this.totalPages) * 100;
-                            
-                            // Renderizar página em canvas
-                            const page = await this.pdfDocument.getPage(pageNum);
-                            const viewport = page.getViewport({ scale: 2 }); // Maior escala para melhor OCR
-                            
-                            const canvas = document.createElement('canvas');
-                            const context = canvas.getContext('2d');
-                            canvas.height = viewport.height;
-                            canvas.width = viewport.width;
-                            
-                            await page.render({
-                                canvasContext: context,
-                                viewport: viewport
-                            }).promise;
-                            
-                            // Aplicar melhorias na imagem se habilitado
-                            if (this.enhanceImage) {
-                                this.enhanceImageQuality(context, canvas.width, canvas.height);
-                            }
-                            
-                            // Executar OCR
-                            const result = await worker.recognize(canvas);
-                            
-                            this.extractedPages.push({
-                                pageNum: pageNum,
-                                text: result.data.text,
-                                confidence: result.data.confidence
-                            });
+                        // FASE 1: Detectar recursos do sistema
+                        const resources = this.detectSystemResources();
+                        this.showMessage(`🖥️ Usando ${resources.workers} workers (${resources.mode})`, 'info');
+
+                        // FASE 2: Verificar cache
+                        const cacheKey = `ocr-${this.pdfFile.name}-${this.ocrLanguage}-${this.ocrMode}`;
+                        const cached = this.loadFromCache(cacheKey);
+                        if (cached) {
+                            this.extractedPages = cached.pages;
+                            this.compileResults();
+                            this.ocrCompleted = true;
+                            this.processing = false;
+                            this.progress = 100;
+                            this.showMessage('✅ Resultado carregado do cache!', 'success');
+                            return;
                         }
-                        
-                        await worker.terminate();
-                        
+
+                        // FASE 1: Renderizar todas as páginas
+                        const pages = await this.renderPagesForOCR();
+
+                        // FASE 1: Criar Scheduler com múltiplos workers
+                        this.progressMessage = `Inicializando ${resources.workers} workers...`;
+                        const scheduler = Tesseract.createScheduler();
+                        const workers = [];
+
+                        // FASE 1: Criar pool de workers com SIMD habilitado
+                        for (let i = 0; i < resources.workers; i++) {
+                            const worker = await Tesseract.createWorker(this.ocrLanguage, 1, {
+                                // FASE 1: Habilitar SIMD para melhor performance
+                                corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v4.0.4/tesseract-core-simd.wasm.js',
+                                logger: (m) => {
+                                    if (m.status === 'recognizing text') {
+                                        const baseProgress = 20 + ((this.performanceMetrics.pagesProcessed / this.totalPages) * 80);
+                                        this.progress = baseProgress;
+                                    }
+                                }
+                            });
+
+                            await worker.setParameters(this.getTesseractParams());
+                            scheduler.addWorker(worker);
+                            workers.push(worker);
+                        }
+
+                        // FASE 3: Métricas de performance
+                        let pagesProcessed = 0;
+                        const updateMetrics = () => {
+                            pagesProcessed++;
+                            this.performanceMetrics.pagesProcessed = pagesProcessed;
+                            const elapsed = (Date.now() - startTime) / 1000;
+                            this.performanceMetrics.pagesPerSecond = (pagesProcessed / elapsed).toFixed(2);
+                            const remaining = this.totalPages - pagesProcessed;
+                            this.performanceMetrics.estimatedTimeRemaining = (remaining / this.performanceMetrics.pagesPerSecond).toFixed(0);
+
+                            this.progressMessage = `Processando: ${pagesProcessed}/${this.totalPages} páginas (${this.performanceMetrics.pagesPerSecond} pág/s)`;
+                        };
+
+                        // FASE 1: Processar todas as páginas em paralelo
+                        const jobs = pages.map(({ pageNum, canvas }) =>
+                            scheduler.addJob('recognize', canvas).then(result => {
+                                updateMetrics();
+                                return {
+                                    pageNum,
+                                    text: result.data.text,
+                                    confidence: result.data.confidence
+                                };
+                            })
+                        );
+
+                        // Aguardar todos os jobs completarem
+                        this.extractedPages = await Promise.all(jobs);
+
+                        // Ordenar páginas por número
+                        this.extractedPages.sort((a, b) => a.pageNum - b.pageNum);
+
+                        // Limpar workers
+                        await scheduler.terminate();
+
                         // Compilar resultados
                         this.compileResults();
                         this.processingTime = ((Date.now() - startTime) / 1000).toFixed(1);
-                        
+
+                        // FASE 2: Salvar no cache
+                        this.saveToCache(cacheKey, {
+                            pages: this.extractedPages,
+                            timestamp: Date.now()
+                        });
+
                         this.ocrCompleted = true;
                         this.processing = false;
                         this.progress = 100;
-                        this.showMessage('OCR concluído com sucesso!', 'success');
-                        
+                        this.showMessage(`✅ OCR concluído! ${this.totalPages} páginas em ${this.processingTime}s (${this.performanceMetrics.pagesPerSecond} pág/s)`, 'success');
+
                     } catch (error) {
+                        console.error('OCR Error:', error);
                         this.processing = false;
                         this.showMessage('Erro no processamento OCR: ' + error.message, 'error');
+                    }
+                },
+
+                // FASE 2: Sistema de Cache
+                loadFromCache(key) {
+                    try {
+                        const cached = localStorage.getItem(key);
+                        if (!cached) return null;
+
+                        const data = JSON.parse(cached);
+                        const age = Date.now() - data.timestamp;
+                        const maxAge = 24 * 60 * 60 * 1000; // 24 horas
+
+                        if (age > maxAge) {
+                            localStorage.removeItem(key);
+                            return null;
+                        }
+
+                        return data;
+                    } catch (e) {
+                        return null;
+                    }
+                },
+
+                saveToCache(key, data) {
+                    try {
+                        localStorage.setItem(key, JSON.stringify(data));
+                    } catch (e) {
+                        console.warn('Não foi possível salvar no cache:', e);
                     }
                 },
                 
