@@ -1,0 +1,83 @@
+📤 INSTRUÇÕES PARA UPLOAD NO GITHUB
+=====================================
+
+1. BAIXAR OS ARQUIVOS
+   - Baixe toda a pasta "Conversorocr" do outputs
+
+2. PREPARAR O GIT (se ainda não tiver)
+   ```bash
+   git config --global user.name "Júlio Borges"
+   git config --global user.email "seu-email@exemplo.com"
+   ```
+
+3. FAZER O UPLOAD PARA O GITHUB
+
+   Opção A - Via Terminal/Git Bash:
+   ```bash
+   # Entrar na pasta do projeto
+   cd Conversorocr
+
+   # Inicializar git
+   git init
+
+   # Adicionar origem remota
+   git remote add origin https://github.com/julioborgesigt/Conversorocr.git
+
+   # Adicionar todos os arquivos
+   git add .
+
+   # Fazer o commit inicial
+   git commit -m "🚀 Sistema OCR Avançado para Processos Digitalizados"
+
+   # Enviar para o GitHub
+   git branch -M main
+   git push -u origin main
+   ```
+
+   Opção B - Via GitHub Desktop:
+   1. Abra o GitHub Desktop
+   2. Clique em "File" > "Add Local Repository"
+   3. Selecione a pasta "Conversorocr"
+   4. Faça o commit com a mensagem "Sistema OCR Avançado"
+   5. Clique em "Publish repository"
+
+   Opção C - Upload Manual via GitHub.com:
+   1. Acesse https://github.com/julioborgesigt/Conversorocr
+   2. Clique em "Add file" > "Upload files"
+   3. Arraste todos os arquivos da pasta
+   4. Escreva uma mensagem de commit
+   5. Clique em "Commit changes"
+
+4. CONFIGURAR GITHUB PAGES (Opcional - para demo online)
+   1. No repositório, vá em Settings
+   2. Role até "Pages"
+   3. Em "Source", selecione "Deploy from a branch"
+   4. Selecione "main" e "/ (root)"
+   5. Clique em Save
+   6. Aguarde alguns minutos
+   7. Acesse: https://julioborgesigt.github.io/Conversorocr
+
+ESTRUTURA DOS ARQUIVOS:
+```
+Conversorocr/
+├── index.html          # Aplicação web standalone
+├── README.md           # Documentação
+├── LICENSE            # Licença MIT
+├── .gitignore         # Arquivos ignorados pelo git
+├── setup.sh           # Script instalação Linux/Mac
+├── setup.bat          # Script instalação Windows
+└── backend/           # Versão Node.js
+    ├── server.js      # Servidor Express
+    └── package.json   # Dependências Node.js
+```
+
+APÓS O UPLOAD:
+- O repositório estará disponível em: https://github.com/julioborgesigt/Conversorocr
+- Qualquer pessoa poderá baixar e usar
+- A versão web funciona apenas abrindo o index.html
+- A versão backend precisa do Node.js instalado
+
+BOA PRÁTICA:
+- Adicione uma estrela ⭐ no próprio repositório
+- Compartilhe com colegas que precisam converter PDFs
+- Aceite contribuições de outros desenvolvedores

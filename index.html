@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor OCR de PDF - Processos Digitalizados</title>
+    
+    <!-- Vue 3 e Vuetify -->
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.x/css/materialdesignicons.min.css" rel="stylesheet">
+    
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <!-- Tesseract.js para OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+    
+    <!-- jsPDF para gerar PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        #app {
+            font-family: 'Roboto', sans-serif;
+        }
+        
+        .pdf-preview {
+            max-width: 100%;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .canvas-container {
+            position: relative;
+            margin: 10px 0;
+        }
+        
+        .page-canvas {
+            width: 100%;
+            height: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .ocr-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.3;
+            background: repeating-linear-gradient(
+                45deg,
+                transparent,
+                transparent 10px,
+                rgba(33, 150, 243, 0.1) 10px,
+                rgba(33, 150, 243, 0.1) 20px
+            );
+        }
+        
+        .extracted-text {
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        
+        .drop-zone {
+            border: 2px dashed #1976d2;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s;
+            background: linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6),
+                        linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+        
+        .drop-zone.dragover {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .confidence-chip {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .confidence-high {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .confidence-medium {
+            background-color: #ff9800;
+            color: white;
+        }
+        
+        .confidence-low {
+            background-color: #f44336;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <v-app>
+            <v-app-bar color="primary" dense>
+                <v-app-bar-title>
+                    <v-icon left>mdi-file-pdf-box</v-icon>
+                    Conversor OCR Avançado para Processos Digitalizados
+                </v-app-bar-title>
+            </v-app-bar>
+            
+            <v-main>
+                <v-container>
+                    <!-- Área de Upload -->
+                    <v-row v-if="!pdfFile">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-cloud-upload</v-icon>
+                                    Upload do PDF Digitalizado
+                                </v-card-title>
+                                <v-card-text>
+                                    <div 
+                                        class="drop-zone"
+                                        @dragover.prevent="dragover = true"
+                                        @dragleave.prevent="dragover = false"
+                                        @drop.prevent="handleDrop"
+                                        :class="{ 'dragover': dragover }"
+                                    >
+                                        <v-icon size="64" color="primary">mdi-file-upload</v-icon>
+                                        <h3 class="mt-4">Arraste o arquivo PDF aqui</h3>
+                                        <p class="text-grey">ou</p>
+                                        <v-btn color="primary" @click="$refs.fileInput.click()">
+                                            <v-icon left>mdi-folder-open</v-icon>
+                                            Selecionar Arquivo
+                                        </v-btn>
+                                        <input
+                                            ref="fileInput"
+                                            type="file"
+                                            accept=".pdf"
+                                            style="display: none"
+                                            @change="handleFileSelect"
+                                        >
+                                    </div>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Configurações de OCR -->
+                    <v-row v-if="pdfFile && !processing">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-cog</v-icon>
+                                    Configurações de OCR
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-row>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="ocrLanguage"
+                                                :items="languages"
+                                                label="Idioma do Documento"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-translate"
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="ocrMode"
+                                                :items="ocrModes"
+                                                label="Modo de OCR"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-eye-settings"
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="outputFormat"
+                                                :items="outputFormats"
+                                                label="Formato de Saída"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-file-export"
+                                            ></v-select>
+                                        </v-col>
+                                    </v-row>
+                                    <v-row>
+                                        <v-col cols="12" md="6">
+                                            <v-switch
+                                                v-model="enhanceImage"
+                                                label="Melhorar qualidade da imagem antes do OCR"
+                                                color="primary"
+                                            ></v-switch>
+                                        </v-col>
+                                        <v-col cols="12" md="6">
+                                            <v-switch
+                                                v-model="preserveLayout"
+                                                label="Preservar layout original"
+                                                color="primary"
+                                            ></v-switch>
+                                        </v-col>
+                                    </v-row>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Preview e Processamento -->
+                    <v-row v-if="pdfFile">
+                        <v-col cols="12" md="6">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-file-eye</v-icon>
+                                    Preview do PDF Original
+                                    <v-spacer></v-spacer>
+                                    <v-chip small>
+                                        {{ totalPages }} página(s)
+                                    </v-chip>
+                                </v-card-title>
+                                <v-card-text>
+                                    <div v-if="currentPageCanvas" class="canvas-container">
+                                        <canvas ref="pdfCanvas" class="page-canvas"></canvas>
+                                        <div v-if="processing" class="ocr-overlay"></div>
+                                    </div>
+                                    <v-pagination
+                                        v-model="currentPage"
+                                        :length="totalPages"
+                                        :total-visible="5"
+                                        class="mt-4"
+                                        @update:model-value="renderPage"
+                                    ></v-pagination>
+                                </v-card-text>
+                                <v-card-actions>
+                                    <v-btn 
+                                        color="primary" 
+                                        @click="startOCR"
+                                        :loading="processing"
+                                        :disabled="processing"
+                                        block
+                                    >
+                                        <v-icon left>mdi-text-recognition</v-icon>
+                                        {{ processing ? 'Processando...' : 'Iniciar Conversão OCR' }}
+                                    </v-btn>
+                                </v-card-actions>
+                            </v-card>
+                        </v-col>
+                        
+                        <v-col cols="12" md="6">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-text-box-outline</v-icon>
+                                    Texto Extraído
+                                    <v-spacer></v-spacer>
+                                    <span v-if="averageConfidence > 0" class="confidence-chip" :class="confidenceClass">
+                                        Confiança: {{ averageConfidence.toFixed(1) }}%
+                                    </span>
+                                </v-card-title>
+                                <v-card-text>
+                                    <div v-if="extractedText" class="extracted-text">
+                                        {{ extractedText }}
+                                    </div>
+                                    <v-alert v-else type="info" outlined>
+                                        O texto extraído aparecerá aqui após o processamento
+                                    </v-alert>
+                                </v-card-text>
+                                <v-card-actions v-if="extractedText">
+                                    <v-btn 
+                                        color="success" 
+                                        @click="downloadSearchablePDF"
+                                        :disabled="!ocrCompleted"
+                                    >
+                                        <v-icon left>mdi-download</v-icon>
+                                        Baixar PDF Pesquisável
+                                    </v-btn>
+                                    <v-btn 
+                                        color="info" 
+                                        @click="downloadText"
+                                        :disabled="!ocrCompleted"
+                                    >
+                                        <v-icon left>mdi-file-document-outline</v-icon>
+                                        Baixar Texto
+                                    </v-btn>
+                                </v-card-actions>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Progress -->
+                    <v-row v-if="processing">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-text>
+                                    <v-progress-linear
+                                        v-model="progress"
+                                        color="primary"
+                                        height="25"
+                                        striped
+                                    >
+                                        <template v-slot:default="{ value }">
+                                            <strong>{{ Math.ceil(value) }}%</strong>
+                                        </template>
+                                    </v-progress-linear>
+                                    <p class="mt-3 text-center">
+                                        {{ progressMessage }}
+                                    </p>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Estatísticas -->
+                    <v-row v-if="ocrCompleted">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-chart-box</v-icon>
+                                    Estatísticas do Processamento
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-row>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ totalPages }}</div>
+                                                    <div>Páginas Processadas</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ wordCount }}</div>
+                                                    <div>Palavras Extraídas</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ processingTime }}s</div>
+                                                    <div>Tempo de Processamento</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ averageConfidence.toFixed(1) }}%</div>
+                                                    <div>Confiança Média</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                    </v-row>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Botão de Reset -->
+                    <v-row v-if="pdfFile">
+                        <v-col cols="12">
+                            <v-btn 
+                                color="error" 
+                                @click="resetApp"
+                                variant="outlined"
+                                block
+                            >
+                                <v-icon left>mdi-restart</v-icon>
+                                Processar Novo Arquivo
+                            </v-btn>
+                        </v-col>
+                    </v-row>
+                </v-container>
+            </v-main>
+            
+            <!-- Snackbar para mensagens -->
+            <v-snackbar v-model="snackbar" :color="snackbarColor" :timeout="3000">
+                {{ snackbarMessage }}
+                <template v-slot:actions>
+                    <v-btn variant="text" @click="snackbar = false">Fechar</v-btn>
+                </template>
+            </v-snackbar>
+        </v-app>
+    </div>
+    
+    <!-- Vue 3 e Vuetify -->
+    <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.js"></script>
+    
+    <script>
+        const { createApp } = Vue;
+        const { createVuetify } = Vuetify;
+        
+        // Configurar PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
+        const vuetify = createVuetify({
+            theme: {
+                themes: {
+                    light: {
+                        colors: {
+                            primary: '#1976D2',
+                            secondary: '#424242',
+                            accent: '#82B1FF',
+                            error: '#FF5252',
+                            info: '#2196F3',
+                            success: '#4CAF50',
+                            warning: '#FFC107'
+                        }
+                    }
+                }
+            }
+        });
+        
+        createApp({
+            data() {
+                return {
+                    // Arquivo PDF
+                    pdfFile: null,
+                    pdfDocument: null,
+                    currentPage: 1,
+                    totalPages: 0,
+                    currentPageCanvas: null,
+                    
+                    // Configurações OCR
+                    ocrLanguage: 'por',
+                    ocrMode: 'accurate',
+                    outputFormat: 'searchable_pdf',
+                    enhanceImage: true,
+                    preserveLayout: true,
+                    
+                    // Estado do processamento
+                    processing: false,
+                    progress: 0,
+                    progressMessage: '',
+                    ocrCompleted: false,
+                    
+                    // Resultados
+                    extractedText: '',
+                    extractedPages: [],
+                    averageConfidence: 0,
+                    wordCount: 0,
+                    processingTime: 0,
+                    
+                    // UI
+                    dragover: false,
+                    snackbar: false,
+                    snackbarMessage: '',
+                    snackbarColor: 'success',
+                    
+                    // Opções
+                    languages: [
+                        { value: 'por', text: 'Português' },
+                        { value: 'eng', text: 'Inglês' },
+                        { value: 'por+eng', text: 'Português + Inglês' }
+                    ],
+                    ocrModes: [
+                        { value: 'fast', text: 'Rápido (menor precisão)' },
+                        { value: 'accurate', text: 'Preciso (recomendado)' },
+                        { value: 'best', text: 'Máxima Qualidade (mais lento)' }
+                    ],
+                    outputFormats: [
+                        { value: 'searchable_pdf', text: 'PDF Pesquisável' },
+                        { value: 'text', text: 'Apenas Texto' },
+                        { value: 'both', text: 'PDF + Texto' }
+                    ]
+                };
+            },
+            
+            computed: {
+                confidenceClass() {
+                    if (this.averageConfidence >= 85) return 'confidence-high';
+                    if (this.averageConfidence >= 70) return 'confidence-medium';
+                    return 'confidence-low';
+                }
+            },
+            
+            methods: {
+                handleDrop(e) {
+                    this.dragover = false;
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0 && files[0].type === 'application/pdf') {
+                        this.loadPDF(files[0]);
+                    }
+                },
+                
+                handleFileSelect(e) {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                        this.loadPDF(file);
+                    }
+                },
+                
+                async loadPDF(file) {
+                    this.pdfFile = file;
+                    
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        this.pdfDocument = await pdfjsLib.getDocument(arrayBuffer).promise;
+                        this.totalPages = this.pdfDocument.numPages;
+                        this.currentPage = 1;
+                        
+                        await this.renderPage(1);
+                        
+                        this.showMessage('PDF carregado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showMessage('Erro ao carregar PDF: ' + error.message, 'error');
+                    }
+                },
+                
+                async renderPage(pageNum) {
+                    if (!this.pdfDocument) return;
+                    
+                    const page = await this.pdfDocument.getPage(pageNum);
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    
+                    const canvas = this.$refs.pdfCanvas;
+                    const context = canvas.getContext('2d');
+                    
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    
+                    await page.render({
+                        canvasContext: context,
+                        viewport: viewport
+                    }).promise;
+                    
+                    this.currentPageCanvas = canvas;
+                },
+                
+                async startOCR() {
+                    this.processing = true;
+                    this.progress = 0;
+                    this.extractedPages = [];
+                    this.extractedText = '';
+                    const startTime = Date.now();
+                    
+                    try {
+                        // Inicializar Tesseract
+                        this.progressMessage = 'Inicializando OCR...';
+                        const worker = await Tesseract.createWorker(this.ocrLanguage, 1, {
+                            logger: (m) => {
+                                if (m.status === 'recognizing text') {
+                                    this.progress = m.progress * 100;
+                                }
+                            }
+                        });
+                        
+                        // Configurar parâmetros do Tesseract baseado no modo
+                        await worker.setParameters(this.getTesseractParams());
+                        
+                        // Processar cada página
+                        for (let pageNum = 1; pageNum <= this.totalPages; pageNum++) {
+                            this.progressMessage = `Processando página ${pageNum} de ${this.totalPages}...`;
+                            this.progress = ((pageNum - 1) / this.totalPages) * 100;
+                            
+                            // Renderizar página em canvas
+                            const page = await this.pdfDocument.getPage(pageNum);
+                            const viewport = page.getViewport({ scale: 2 }); // Maior escala para melhor OCR
+                            
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            
+                            await page.render({
+                                canvasContext: context,
+                                viewport: viewport
+                            }).promise;
+                            
+                            // Aplicar melhorias na imagem se habilitado
+                            if (this.enhanceImage) {
+                                this.enhanceImageQuality(context, canvas.width, canvas.height);
+                            }
+                            
+                            // Executar OCR
+                            const result = await worker.recognize(canvas);
+                            
+                            this.extractedPages.push({
+                                pageNum: pageNum,
+                                text: result.data.text,
+                                confidence: result.data.confidence
+                            });
+                        }
+                        
+                        await worker.terminate();
+                        
+                        // Compilar resultados
+                        this.compileResults();
+                        this.processingTime = ((Date.now() - startTime) / 1000).toFixed(1);
+                        
+                        this.ocrCompleted = true;
+                        this.processing = false;
+                        this.progress = 100;
+                        this.showMessage('OCR concluído com sucesso!', 'success');
+                        
+                    } catch (error) {
+                        this.processing = false;
+                        this.showMessage('Erro no processamento OCR: ' + error.message, 'error');
+                    }
+                },
+                
+                getTesseractParams() {
+                    const params = {
+                        tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
+                        preserve_interword_spaces: '1'
+                    };
+                    
+                    if (this.ocrMode === 'fast') {
+                        params.tessedit_ocr_engine_mode = '3';
+                    } else if (this.ocrMode === 'best') {
+                        params.tessedit_ocr_engine_mode = '1';
+                        params.tessedit_char_whitelist = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÄÇÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜàáâãäçèéêëìíîïòóôõöùúûü .,;:!?-/()"\'';
+                    }
+                    
+                    return params;
+                },
+                
+                enhanceImageQuality(context, width, height) {
+                    // Aplicar filtros para melhorar a qualidade da imagem
+                    const imageData = context.getImageData(0, 0, width, height);
+                    const data = imageData.data;
+                    
+                    // Aumentar contraste
+                    for (let i = 0; i < data.length; i += 4) {
+                        data[i] = this.adjustContrast(data[i], 1.5);     // Red
+                        data[i + 1] = this.adjustContrast(data[i + 1], 1.5); // Green
+                        data[i + 2] = this.adjustContrast(data[i + 2], 1.5); // Blue
+                    }
+                    
+                    // Binarização (preto e branco)
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        const binary = gray > 128 ? 255 : 0;
+                        data[i] = data[i + 1] = data[i + 2] = binary;
+                    }
+                    
+                    context.putImageData(imageData, 0, 0);
+                },
+                
+                adjustContrast(value, contrast) {
+                    return ((value / 255 - 0.5) * contrast + 0.5) * 255;
+                },
+                
+                compileResults() {
+                    // Compilar texto de todas as páginas
+                    this.extractedText = this.extractedPages
+                        .map(p => `--- Página ${p.pageNum} ---\n${p.text}`)
+                        .join('\n\n');
+                    
+                    // Calcular estatísticas
+                    const totalConfidence = this.extractedPages.reduce((sum, p) => sum + p.confidence, 0);
+                    this.averageConfidence = totalConfidence / this.extractedPages.length;
+                    
+                    this.wordCount = this.extractedText.split(/\s+/).filter(word => word.length > 0).length;
+                },
+                
+                async downloadSearchablePDF() {
+                    try {
+                        const { jsPDF } = window.jspdf;
+                        const pdf = new jsPDF();
+                        
+                        // Adicionar cada página com texto invisível (searchable)
+                        for (let i = 0; i < this.extractedPages.length; i++) {
+                            if (i > 0) pdf.addPage();
+                            
+                            // Renderizar imagem da página original
+                            const page = await this.pdfDocument.getPage(i + 1);
+                            const viewport = page.getViewport({ scale: 2 });
+                            
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            
+                            await page.render({
+                                canvasContext: context,
+                                viewport: viewport
+                            }).promise;
+                            
+                            // Adicionar imagem ao PDF
+                            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                            pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+                            
+                            // Adicionar texto invisível para tornar pesquisável
+                            pdf.setTextColor(255, 255, 255);
+                            pdf.setFontSize(1);
+                            
+                            const lines = this.extractedPages[i].text.split('\n');
+                            let y = 10;
+                            for (const line of lines) {
+                                if (line.trim()) {
+                                    pdf.text(line, 10, y);
+                                    y += 5;
+                                    if (y > 280) break;
+                                }
+                            }
+                        }
+                        
+                        // Salvar PDF
+                        const fileName = this.pdfFile.name.replace('.pdf', '_OCR.pdf');
+                        pdf.save(fileName);
+                        
+                        this.showMessage('PDF pesquisável baixado com sucesso!', 'success');
+                    } catch (error) {
+                        this.showMessage('Erro ao gerar PDF: ' + error.message, 'error');
+                    }
+                },
+                
+                downloadText() {
+                    const blob = new Blob([this.extractedText], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = this.pdfFile.name.replace('.pdf', '_texto.txt');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    
+                    this.showMessage('Texto extraído baixado com sucesso!', 'success');
+                },
+                
+                resetApp() {
+                    this.pdfFile = null;
+                    this.pdfDocument = null;
+                    this.currentPage = 1;
+                    this.totalPages = 0;
+                    this.extractedText = '';
+                    this.extractedPages = [];
+                    this.ocrCompleted = false;
+                    this.averageConfidence = 0;
+                    this.wordCount = 0;
+                    this.processingTime = 0;
+                    this.$refs.fileInput.value = '';
+                },
+                
+                showMessage(message, color = 'success') {
+                    this.snackbarMessage = message;
+                    this.snackbarColor = color;
+                    this.snackbar = true;
+                }
+            }
+        }).use(vuetify).mount('#app');
+    </script>
+</body>
+</html>
