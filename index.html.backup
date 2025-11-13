@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor OCR de PDF - Processos Digitalizados</title>
+    
+    <!-- Vue 3 e Vuetify -->
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.x/css/materialdesignicons.min.css" rel="stylesheet">
+    
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <!-- Tesseract.js para OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+    
+    <!-- jsPDF para gerar PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        #app {
+            font-family: 'Roboto', sans-serif;
+        }
+        
+        .pdf-preview {
+            max-width: 100%;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .canvas-container {
+            position: relative;
+            margin: 10px 0;
+        }
+        
+        .page-canvas {
+            width: 100%;
+            height: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .ocr-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.3;
+            background: repeating-linear-gradient(
+                45deg,
+                transparent,
+                transparent 10px,
+                rgba(33, 150, 243, 0.1) 10px,
+                rgba(33, 150, 243, 0.1) 20px
+            );
+        }
+        
+        .extracted-text {
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        
+        .drop-zone {
+            border: 2px dashed #1976d2;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s;
+            background: linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6),
+                        linear-gradient(45deg, #f3f4f6 25%, transparent 25%, transparent 75%, #f3f4f6 75%, #f3f4f6);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+        
+        .drop-zone.dragover {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .confidence-chip {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .confidence-high {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .confidence-medium {
+            background-color: #ff9800;
+            color: white;
+        }
+        
+        .confidence-low {
+            background-color: #f44336;
+            color: white;
+        }
+
+        /* Performance Metrics Styles */
+        .performance-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            margin: 4px;
+        }
+
+        .performance-metric {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 8px 0;
+            border-left: 4px solid #2196f3;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .metric-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #2196f3;
+        }
+
+        .resource-chip {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            margin: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <v-app>
+            <v-app-bar color="primary" dense>
+                <v-app-bar-title>
+                    <v-icon left>mdi-file-pdf-box</v-icon>
+                    Conversor OCR Avançado para Processos Digitalizados
+                </v-app-bar-title>
+            </v-app-bar>
+            
+            <v-main>
+                <v-container>
+                    <!-- Área de Upload -->
+                    <v-row v-if="!pdfFile">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-cloud-upload</v-icon>
+                                    Upload do PDF Digitalizado
+                                </v-card-title>
+                                <v-card-text>
+                                    <div 
+                                        class="drop-zone"
+                                        @dragover.prevent="dragover = true"
+                                        @dragleave.prevent="dragover = false"
+                                        @drop.prevent="handleDrop"
+                                        :class="{ 'dragover': dragover }"
+                                    >
+                                        <v-icon size="64" color="primary">mdi-file-upload</v-icon>
+                                        <h3 class="mt-4">Arraste o arquivo PDF aqui</h3>
+                                        <p class="text-grey">ou</p>
+                                        <v-btn color="primary" @click="$refs.fileInput.click()">
+                                            <v-icon left>mdi-folder-open</v-icon>
+                                            Selecionar Arquivo
+                                        </v-btn>
+                                        <input
+                                            ref="fileInput"
+                                            type="file"
+                                            accept=".pdf"
+                                            style="display: none"
+                                            @change="handleFileSelect"
+                                        >
+                                    </div>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Configurações de OCR -->
+                    <v-row v-if="pdfFile && !processing">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-cog</v-icon>
+                                    Configurações de OCR
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-row>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="ocrLanguage"
+                                                :items="languages"
+                                                label="Idioma do Documento"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-translate"
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="ocrMode"
+                                                :items="ocrModes"
+                                                label="Modo de OCR"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-eye-settings"
+                                            ></v-select>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <v-select
+                                                v-model="outputFormat"
+                                                :items="outputFormats"
+                                                label="Formato de Saída"
+                                                item-title="text"
+                                                item-value="value"
+                                                prepend-icon="mdi-file-export"
+                                            ></v-select>
+                                        </v-col>
+                                    </v-row>
+                                    <v-row>
+                                        <v-col cols="12" md="6">
+                                            <v-switch
+                                                v-model="enhanceImage"
+                                                label="Melhorar qualidade da imagem antes do OCR"
+                                                color="primary"
+                                            ></v-switch>
+                                        </v-col>
+                                        <v-col cols="12" md="6">
+                                            <v-switch
+                                                v-model="preserveLayout"
+                                                label="Preservar layout original"
+                                                color="primary"
+                                            ></v-switch>
+                                        </v-col>
+                                    </v-row>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Preview e Processamento -->
+                    <v-row v-if="pdfFile">
+                        <v-col cols="12" md="6">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-file-eye</v-icon>
+                                    Preview do PDF Original
+                                    <v-spacer></v-spacer>
+                                    <v-chip small>
+                                        {{ totalPages }} página(s)
+                                    </v-chip>
+                                </v-card-title>
+                                <v-card-text>
+                                    <div v-if="pdfDocument" class="canvas-container">
+                                        <canvas ref="pdfCanvas" class="page-canvas"></canvas>
+                                        <div v-if="processing" class="ocr-overlay"></div>
+                                    </div>
+                                    <v-pagination
+                                        v-model="currentPage"
+                                        :length="totalPages"
+                                        :total-visible="5"
+                                        class="mt-4"
+                                        @update:model-value="renderPage"
+                                    ></v-pagination>
+                                </v-card-text>
+                                <v-card-actions>
+                                    <v-btn 
+                                        color="primary" 
+                                        @click="startOCR"
+                                        :loading="processing"
+                                        :disabled="processing"
+                                        block
+                                    >
+                                        <v-icon left>mdi-text-recognition</v-icon>
+                                        {{ processing ? 'Processando...' : 'Iniciar Conversão OCR' }}
+                                    </v-btn>
+                                </v-card-actions>
+                            </v-card>
+                        </v-col>
+                        
+                        <v-col cols="12" md="6">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-text-box-outline</v-icon>
+                                    Texto Extraído
+                                    <v-spacer></v-spacer>
+                                    <span v-if="averageConfidence > 0" class="confidence-chip" :class="confidenceClass">
+                                        Confiança: {{ averageConfidence.toFixed(1) }}%
+                                    </span>
+                                </v-card-title>
+                                <v-card-text>
+                                    <div v-if="extractedText" class="extracted-text">
+                                        {{ extractedText }}
+                                    </div>
+                                    <v-alert v-else type="info" outlined>
+                                        O texto extraído aparecerá aqui após o processamento
+                                    </v-alert>
+                                </v-card-text>
+                                <v-card-actions v-if="extractedText">
+                                    <v-btn 
+                                        color="success" 
+                                        @click="downloadSearchablePDF"
+                                        :disabled="!ocrCompleted"
+                                    >
+                                        <v-icon left>mdi-download</v-icon>
+                                        Baixar PDF Pesquisável
+                                    </v-btn>
+                                    <v-btn 
+                                        color="info" 
+                                        @click="downloadText"
+                                        :disabled="!ocrCompleted"
+                                    >
+                                        <v-icon left>mdi-file-document-outline</v-icon>
+                                        Baixar Texto
+                                    </v-btn>
+                                </v-card-actions>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Progress -->
+                    <v-row v-if="processing">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-text>
+                                    <v-progress-linear
+                                        v-model="progress"
+                                        color="primary"
+                                        height="25"
+                                        striped
+                                    >
+                                        <template v-slot:default="{ value }">
+                                            <strong>{{ Math.ceil(value) }}%</strong>
+                                        </template>
+                                    </v-progress-linear>
+                                    <p class="mt-3 text-center">
+                                        {{ progressMessage }}
+                                    </p>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+                    
+                    <!-- Estatísticas -->
+                    <v-row v-if="ocrCompleted">
+                        <v-col cols="12">
+                            <v-card>
+                                <v-card-title>
+                                    <v-icon left>mdi-chart-box</v-icon>
+                                    Estatísticas do Processamento
+                                </v-card-title>
+                                <v-card-text>
+                                    <v-row>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ totalPages }}</div>
+                                                    <div>Páginas Processadas</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ wordCount }}</div>
+                                                    <div>Palavras Extraídas</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ processingTime }}s</div>
+                                                    <div>Tempo de Processamento</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                        <v-col cols="6" md="3">
+                                            <v-card outlined>
+                                                <v-card-text class="text-center">
+                                                    <div class="text-h4">{{ averageConfidence.toFixed(1) }}%</div>
+                                                    <div>Confiança Média</div>
+                                                </v-card-text>
+                                            </v-card>
+                                        </v-col>
+                                    </v-row>
+
+                                    <!-- FASE 3: Métricas de Performance -->
+                                    <v-divider class="my-4"></v-divider>
+                                    <div class="text-subtitle-1 mb-3">
+                                        <v-icon left>mdi-speedometer</v-icon>
+                                        Métricas de Performance
+                                    </div>
+                                    <v-row>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Velocidade de Processamento</div>
+                                                <div class="metric-value">{{ performanceMetrics.pagesPerSecond }} pág/s</div>
+                                            </div>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Workers Utilizados</div>
+                                                <div class="metric-value">{{ systemResources.workers }} workers</div>
+                                            </div>
+                                        </v-col>
+                                        <v-col cols="12" md="4">
+                                            <div class="performance-metric">
+                                                <div class="metric-label">Modo de Performance</div>
+                                                <div class="metric-value" style="font-size: 16px;">{{ systemResources.mode }}</div>
+                                            </div>
+                                        </v-col>
+                                    </v-row>
+
+                                    <!-- Recursos do Sistema -->
+                                    <div class="mt-4">
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-cpu-64-bit</v-icon>
+                                            {{ systemResources.cpuCores }} CPU Cores
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-memory</v-icon>
+                                            {{ systemResources.memoryGB }} GB RAM
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-flash</v-icon>
+                                            WebAssembly SIMD
+                                        </span>
+                                        <span class="resource-chip">
+                                            <v-icon small left>mdi-cached</v-icon>
+                                            Cache Ativo
+                                        </span>
+                                    </div>
+                                </v-card-text>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+
+                    <!-- Botão de Reset -->
+                    <v-row v-if="pdfFile">
+                        <v-col cols="12">
+                            <v-btn 
+                                color="error" 
+                                @click="resetApp"
+                                variant="outlined"
+                                block
+                            >
+                                <v-icon left>mdi-restart</v-icon>
+                                Processar Novo Arquivo
+                            </v-btn>
+                        </v-col>
+                    </v-row>
+                </v-container>
+            </v-main>
+            
+            <!-- Snackbar para mensagens -->
+            <v-snackbar v-model="snackbar" :color="snackbarColor" :timeout="3000">
+                {{ snackbarMessage }}
+                <template v-slot:actions>
+                    <v-btn variant="text" @click="snackbar = false">Fechar</v-btn>
+                </template>
+            </v-snackbar>
+        </v-app>
+    </div>
+    
+    <!-- Vue 3 e Vuetify -->
+    <script src="https://unpkg.com/vue@3.4.0/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@3.4.0/dist/vuetify.min.js"></script>
+    
+    <script>
+        const { createApp } = Vue;
+        const { createVuetify } = Vuetify;
+        
+        // Configurar PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        
+        const vuetify = createVuetify({
+            theme: {
+                themes: {
+                    light: {
+                        colors: {
+                            primary: '#1976D2',
+                            secondary: '#424242',
+                            accent: '#82B1FF',
+                            error: '#FF5252',
+                            info: '#2196F3',
+                            success: '#4CAF50',
+                            warning: '#FFC107'
+                        }
+                    }
+                }
+            }
+        });
+        
+        createApp({
+            data() {
+                return {
+                    // Arquivo PDF
+                    pdfFile: null,
+                    pdfDocument: null,
+                    currentPage: 1,
+                    totalPages: 0,
+                    currentPageCanvas: null,
+                    
+                    // Configurações OCR
+                    ocrLanguage: 'por',
+                    ocrMode: 'accurate',
+                    outputFormat: 'searchable_pdf',
+                    enhanceImage: true,
+                    preserveLayout: true,
+                    
+                    // Estado do processamento
+                    processing: false,
+                    progress: 0,
+                    progressMessage: '',
+                    ocrCompleted: false,
+
+                    // Resultados
+                    extractedText: '',
+                    extractedPages: [],
+                    averageConfidence: 0,
+                    wordCount: 0,
+                    processingTime: 0,
+
+                    // Performance e recursos
+                    systemResources: {
+                        cpuCores: 4,
+                        workers: 4,
+                        memoryGB: 4,
+                        mode: 'auto'
+                    },
+                    performanceMetrics: {
+                        pagesProcessed: 0,
+                        pagesPerSecond: 0,
+                        estimatedTimeRemaining: 0
+                    },
+                    
+                    // UI
+                    dragover: false,
+                    snackbar: false,
+                    snackbarMessage: '',
+                    snackbarColor: 'success',
+                    
+                    // Opções
+                    languages: [
+                        { value: 'por', text: 'Português' },
+                        { value: 'eng', text: 'Inglês' },
+                        { value: 'por+eng', text: 'Português + Inglês' }
+                    ],
+                    ocrModes: [
+                        { value: 'fast', text: 'Rápido (menor precisão)' },
+                        { value: 'accurate', text: 'Preciso (recomendado)' },
+                        { value: 'best', text: 'Máxima Qualidade (mais lento)' }
+                    ],
+                    outputFormats: [
+                        { value: 'searchable_pdf', text: 'PDF Pesquisável' },
+                        { value: 'text', text: 'Apenas Texto' },
+                        { value: 'both', text: 'PDF + Texto' }
+                    ]
+                };
+            },
+            
+            computed: {
+                confidenceClass() {
+                    if (this.averageConfidence >= 85) return 'confidence-high';
+                    if (this.averageConfidence >= 70) return 'confidence-medium';
+                    return 'confidence-low';
+                }
+            },
+            
+            methods: {
+                handleDrop(e) {
+                    this.dragover = false;
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0 && files[0].type === 'application/pdf') {
+                        this.loadPDF(files[0]);
+                    }
+                },
+                
+                handleFileSelect(e) {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                        this.loadPDF(file);
+                    }
+                },
+                
+                async loadPDF(file) {
+                    this.pdfFile = file;
+
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        const typedArray = new Uint8Array(arrayBuffer);
+
+                        const loadingTask = pdfjsLib.getDocument({data: typedArray});
+                        const pdfDoc = await loadingTask.promise;
+
+                        // Use markRaw para prevenir que Vue torne o PDF reativo
+                        // Isso evita problemas com membros privados do PDF.js
+                        this.pdfDocument = Vue.markRaw(pdfDoc);
+
+                        this.totalPages = this.pdfDocument.numPages;
+                        this.currentPage = 1;
+
+                        // Aguarda Vue renderizar o canvas no DOM
+                        await this.$nextTick();
+
+                        await this.renderPage(1);
+
+                        this.showMessage('PDF carregado com sucesso!', 'success');
+                    } catch (error) {
+                        console.error('PDF loading error details:', error);
+                        this.showMessage('Erro ao carregar PDF: ' + error.message, 'error');
+                    }
+                },
+                
+                async renderPage(pageNum) {
+                    if (!this.pdfDocument) return;
+                    
+                    const page = await this.pdfDocument.getPage(pageNum);
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    
+                    const canvas = this.$refs.pdfCanvas;
+                    const context = canvas.getContext('2d');
+                    
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    
+                    await page.render({
+                        canvasContext: context,
+                        viewport: viewport
+                    }).promise;
+                    
+                    this.currentPageCanvas = canvas;
+                },
+
+                // FASE 1: Detectar recursos do sistema
+                detectSystemResources() {
+                    const cpuCores = navigator.hardwareConcurrency || 4;
+                    const memoryGB = navigator.deviceMemory || 4;
+
+                    // Ajustar número de workers baseado nos recursos
+                    let workers, mode;
+
+                    if (cpuCores >= 8 && memoryGB >= 8) {
+                        workers = Math.min(cpuCores, 8); // Máximo de 8 workers
+                        mode = 'high-performance';
+                    } else if (cpuCores >= 4 && memoryGB >= 4) {
+                        workers = 4;
+                        mode = 'balanced';
+                    } else {
+                        workers = 2;
+                        mode = 'low-resource';
+                    }
+
+                    this.systemResources = {
+                        cpuCores,
+                        workers,
+                        memoryGB,
+                        mode
+                    };
+
+                    console.log('🖥️ Recursos detectados:', this.systemResources);
+                    return this.systemResources;
+                },
+
+                // FASE 2: Pré-processamento otimizado com OffscreenCanvas
+                async enhanceImageOptimized(canvas) {
+                    if (!this.enhanceImage) return canvas;
+
+                    try {
+                        // Usar OffscreenCanvas se disponível (mais rápido)
+                        const offscreen = new OffscreenCanvas(canvas.width, canvas.height);
+                        const ctx = offscreen.getContext('2d', {
+                            willReadFrequently: false,
+                            desynchronized: true
+                        });
+
+                        // Aplicar filtros usando GPU
+                        ctx.filter = 'contrast(1.5) brightness(1.1) grayscale(1)';
+                        ctx.drawImage(canvas, 0, 0);
+
+                        return offscreen;
+                    } catch (e) {
+                        // Fallback para método tradicional
+                        const context = canvas.getContext('2d');
+                        this.enhanceImageQuality(context, canvas.width, canvas.height);
+                        return canvas;
+                    }
+                },
+
+                // FASE 1 & 2: Renderizar páginas com melhorias de qualidade
+                async renderPagesForOCR() {
+                    const pages = [];
+                    let nativeTextPages = 0;
+
+                    this.progressMessage = 'Analisando páginas...';
+
+                    for (let pageNum = 1; pageNum <= this.totalPages; pageNum++) {
+                        // MELHORIA 1: Verificar se há texto nativo (evita OCR!)
+                        const nativeText = await this.checkNativeText(pageNum);
+
+                        if (nativeText) {
+                            // Página tem texto nativo, não precisa OCR!
+                            pages.push({
+                                pageNum,
+                                canvas: null,
+                                nativeText: nativeText,
+                                skipOCR: true
+                            });
+                            nativeTextPages++;
+                            this.progress = (pageNum / this.totalPages) * 20;
+                            continue;
+                        }
+
+                        // Precisa fazer OCR, renderizar a página
+                        const page = await this.pdfDocument.getPage(pageNum);
+                        const viewport = page.getViewport({ scale: 2 });
+
+                        const canvas = document.createElement('canvas');
+                        const context = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+
+                        await page.render({
+                            canvasContext: context,
+                            viewport: viewport
+                        }).promise;
+
+                        // MELHORIA 7: Aplicar pré-processamento AVANÇADO
+                        const enhancedCanvas = await this.enhanceImageAdvanced(canvas);
+
+                        pages.push({
+                            pageNum,
+                            canvas: enhancedCanvas,
+                            skipOCR: false
+                        });
+
+                        this.progress = (pageNum / this.totalPages) * 20; // 20% para renderização
+                    }
+
+                    if (nativeTextPages > 0) {
+                        console.log(`✅ ${nativeTextPages} páginas com texto nativo detectadas (OCR pulado!)`);
+                    }
+
+                    return pages;
+                },
+
+                // FASE 1, 2 & 3: OCR Paralelo Otimizado com Múltiplos Workers
+                async startOCR() {
+                    this.processing = true;
+                    this.progress = 0;
+                    this.extractedPages = [];
+                    this.extractedText = '';
+                    this.performanceMetrics.pagesProcessed = 0;
+                    const startTime = Date.now();
+
+                    try {
+                        // FASE 1: Detectar recursos do sistema
+                        const resources = this.detectSystemResources();
+                        this.showMessage(`🖥️ Usando ${resources.workers} workers (${resources.mode})`, 'info');
+
+                        // FASE 2: Verificar cache
+                        const cacheKey = `ocr-${this.pdfFile.name}-${this.ocrLanguage}-${this.ocrMode}`;
+                        const cached = this.loadFromCache(cacheKey);
+                        if (cached) {
+                            this.extractedPages = cached.pages;
+                            this.compileResults();
+                            this.ocrCompleted = true;
+                            this.processing = false;
+                            this.progress = 100;
+                            this.showMessage('✅ Resultado carregado do cache!', 'success');
+                            return;
+                        }
+
+                        // FASE 1: Renderizar todas as páginas
+                        const pages = await this.renderPagesForOCR();
+
+                        // FASE 1: Criar Scheduler com múltiplos workers
+                        this.progressMessage = `Inicializando ${resources.workers} workers...`;
+                        const scheduler = Tesseract.createScheduler();
+                        const workers = [];
+
+                        // FASE 1: Criar pool de workers com SIMD habilitado
+                        for (let i = 0; i < resources.workers; i++) {
+                            const worker = await Tesseract.createWorker(this.ocrLanguage, 1, {
+                                // FASE 1: Habilitar SIMD para melhor performance
+                                corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v4.0.4/tesseract-core-simd.wasm.js',
+                                logger: (m) => {
+                                    if (m.status === 'recognizing text') {
+                                        const baseProgress = 20 + ((this.performanceMetrics.pagesProcessed / this.totalPages) * 80);
+                                        this.progress = baseProgress;
+                                    }
+                                }
+                            });
+
+                            // MELHORIA 6: Usar parâmetros otimizados por modo
+                            await worker.setParameters(this.getOptimizedTesseractParams());
+                            scheduler.addWorker(worker);
+                            workers.push(worker);
+                        }
+
+                        // FASE 3: Métricas de performance
+                        let pagesProcessed = 0;
+                        const updateMetrics = () => {
+                            pagesProcessed++;
+                            this.performanceMetrics.pagesProcessed = pagesProcessed;
+                            const elapsed = (Date.now() - startTime) / 1000;
+                            this.performanceMetrics.pagesPerSecond = (pagesProcessed / elapsed).toFixed(2);
+                            const remaining = this.totalPages - pagesProcessed;
+                            this.performanceMetrics.estimatedTimeRemaining = (remaining / this.performanceMetrics.pagesPerSecond).toFixed(0);
+
+                            this.progressMessage = `Processando: ${pagesProcessed}/${this.totalPages} páginas (${this.performanceMetrics.pagesPerSecond} pág/s)`;
+                        };
+
+                        // MELHORIA 1 & FASE 1: Processar páginas (com texto nativo ou OCR)
+                        // CORREÇÃO CRÍTICA: Usar workers individuais para garantir dados completos
+                        let workerIndex = 0;
+                        const jobs = pages.map(({ pageNum, canvas, nativeText, skipOCR }) => {
+                            if (skipOCR && nativeText) {
+                                // Página tem texto nativo, retornar direto!
+                                updateMetrics();
+                                return Promise.resolve({
+                                    pageNum,
+                                    text: nativeText,
+                                    confidence: 100,
+                                    native: true,
+                                    words: [] // Sem coordenadas para texto nativo
+                                });
+                            }
+
+                            // CORREÇÃO: Usar worker diretamente em vez de scheduler para obter dados completos
+                            const worker = workers[workerIndex % workers.length];
+                            workerIndex++;
+
+                            return worker.recognize(canvas).then(result => {
+                                updateMetrics();
+
+                                // DEBUG: Verificar estrutura de dados retornada
+                                console.log(`🔍 DEBUG Página ${pageNum}:`, {
+                                    hasResult: !!result,
+                                    hasData: !!result.data,
+                                    dataKeys: result.data ? Object.keys(result.data) : [],
+                                    hasWords: !!(result.data && result.data.words),
+                                    wordCount: result.data && result.data.words ? result.data.words.length : 0,
+                                    sampleWord: result.data && result.data.words && result.data.words[0] ? {
+                                        text: result.data.words[0].text,
+                                        hasBbox: !!result.data.words[0].bbox,
+                                        bbox: result.data.words[0].bbox
+                                    } : null
+                                });
+
+                                // MELHORIA 5: Aplicar pós-processamento
+                                const processedText = this.postProcessText(result.data.text);
+                                return {
+                                    pageNum,
+                                    text: processedText,
+                                    confidence: result.data.confidence,
+                                    native: false,
+                                    // CORREÇÃO: Armazenar dados de palavras com coordenadas
+                                    words: result.data.words || [],
+                                    lines: result.data.lines || [],
+                                    _debug: result.data // Store full data for debugging
+                                };
+                            });
+                        });
+
+                        // Aguardar todos os jobs completarem
+                        this.extractedPages = await Promise.all(jobs);
+
+                        // Ordenar páginas por número
+                        this.extractedPages.sort((a, b) => a.pageNum - b.pageNum);
+
+                        // Limpar workers
+                        for (const worker of workers) {
+                            await worker.terminate();
+                        }
+                        await scheduler.terminate();
+
+                        // Compilar resultados
+                        this.compileResults();
+                        this.processingTime = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                        // FASE 2: Salvar no cache
+                        this.saveToCache(cacheKey, {
+                            pages: this.extractedPages,
+                            timestamp: Date.now()
+                        });
+
+                        this.ocrCompleted = true;
+                        this.processing = false;
+                        this.progress = 100;
+                        this.showMessage(`✅ OCR concluído! ${this.totalPages} páginas em ${this.processingTime}s (${this.performanceMetrics.pagesPerSecond} pág/s)`, 'success');
+
+                    } catch (error) {
+                        console.error('OCR Error:', error);
+                        this.processing = false;
+                        this.showMessage('Erro no processamento OCR: ' + error.message, 'error');
+                    }
+                },
+
+                // FASE 2: Sistema de Cache
+                loadFromCache(key) {
+                    try {
+                        const cached = localStorage.getItem(key);
+                        if (!cached) return null;
+
+                        const data = JSON.parse(cached);
+                        const age = Date.now() - data.timestamp;
+                        const maxAge = 24 * 60 * 60 * 1000; // 24 horas
+
+                        if (age > maxAge) {
+                            localStorage.removeItem(key);
+                            return null;
+                        }
+
+                        return data;
+                    } catch (e) {
+                        return null;
+                    }
+                },
+
+                saveToCache(key, data) {
+                    try {
+                        localStorage.setItem(key, JSON.stringify(data));
+                    } catch (e) {
+                        console.warn('Não foi possível salvar no cache:', e);
+                    }
+                },
+
+                // ======= MELHORIAS DE QUALIDADE E VELOCIDADE =======
+
+                // MELHORIA 1: Detecção de Texto Nativo (VELOCIDADE ⭐⭐⭐⭐⭐)
+                async checkNativeText(pageNum) {
+                    try {
+                        const page = await this.pdfDocument.getPage(pageNum);
+                        const textContent = await page.getTextContent();
+                        const text = textContent.items.map(item => item.str).join(' ').trim();
+
+                        // Se a página tem mais de 50 caracteres de texto nativo, não precisa OCR
+                        return text.length > 50 ? text : null;
+                    } catch (e) {
+                        return null;
+                    }
+                },
+
+                // MELHORIA 2: Binarização Adaptativa com Otsu (QUALIDADE ⭐⭐⭐⭐⭐)
+                applyOtsuBinarization(imageData) {
+                    const data = imageData.data;
+                    const len = data.length;
+
+                    // Converter para grayscale
+                    const grayPixels = [];
+                    for (let i = 0; i < len; i += 4) {
+                        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        grayPixels.push(gray);
+                    }
+
+                    // Calcular histograma
+                    const histogram = new Array(256).fill(0);
+                    for (const gray of grayPixels) {
+                        histogram[Math.floor(gray)]++;
+                    }
+
+                    // Método de Otsu para encontrar threshold ideal
+                    const total = grayPixels.length;
+                    let sum = 0;
+                    for (let i = 0; i < 256; i++) {
+                        sum += i * histogram[i];
+                    }
+
+                    let sumB = 0;
+                    let wB = 0;
+                    let wF = 0;
+                    let maxVariance = 0;
+                    let threshold = 0;
+
+                    for (let i = 0; i < 256; i++) {
+                        wB += histogram[i];
+                        if (wB === 0) continue;
+
+                        wF = total - wB;
+                        if (wF === 0) break;
+
+                        sumB += i * histogram[i];
+                        const mB = sumB / wB;
+                        const mF = (sum - sumB) / wF;
+                        const variance = wB * wF * (mB - mF) * (mB - mF);
+
+                        if (variance > maxVariance) {
+                            maxVariance = variance;
+                            threshold = i;
+                        }
+                    }
+
+                    // Aplicar threshold encontrado
+                    for (let i = 0, j = 0; i < len; i += 4, j++) {
+                        const binary = grayPixels[j] > threshold ? 255 : 0;
+                        data[i] = data[i + 1] = data[i + 2] = binary;
+                    }
+
+                    return imageData;
+                },
+
+                // MELHORIA 3: Remoção de Ruído Avançada (QUALIDADE ⭐⭐⭐⭐)
+                removeNoiseAdvanced(imageData) {
+                    const data = imageData.data;
+                    const width = imageData.width;
+                    const height = imageData.height;
+
+                    // Filtro de mediana 3x3 (remove ruído salt-and-pepper)
+                    const output = new Uint8ClampedArray(data);
+
+                    for (let y = 1; y < height - 1; y++) {
+                        for (let x = 1; x < width - 1; x++) {
+                            const neighbors = [];
+
+                            // Coletar vizinhos 3x3
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const idx = ((y + dy) * width + (x + dx)) * 4;
+                                    neighbors.push(data[idx]);
+                                }
+                            }
+
+                            // Mediana
+                            neighbors.sort((a, b) => a - b);
+                            const median = neighbors[4];
+
+                            const idx = (y * width + x) * 4;
+                            output[idx] = output[idx + 1] = output[idx + 2] = median;
+                        }
+                    }
+
+                    // Copiar de volta
+                    for (let i = 0; i < data.length; i++) {
+                        data[i] = output[i];
+                    }
+
+                    return imageData;
+                },
+
+                // MELHORIA 4: Detecção e Correção de Orientação (QUALIDADE ⭐⭐⭐⭐)
+                async detectAndCorrectOrientation(canvas) {
+                    // Criar worker temporário apenas para detectar orientação
+                    const detector = await Tesseract.createWorker(this.ocrLanguage, 1, {
+                        logger: () => {} // Silenciar
+                    });
+
+                    const result = await detector.recognize(canvas);
+                    const orientation = result.data.orientation;
+
+                    await detector.terminate();
+
+                    // Se rotação detectada, corrigir
+                    if (orientation && orientation.confidence > 0.5 && orientation.degrees !== 0) {
+                        const rotated = document.createElement('canvas');
+                        const ctx = rotated.getContext('2d');
+
+                        if (orientation.degrees === 90 || orientation.degrees === 270) {
+                            rotated.width = canvas.height;
+                            rotated.height = canvas.width;
+                        } else {
+                            rotated.width = canvas.width;
+                            rotated.height = canvas.height;
+                        }
+
+                        ctx.translate(rotated.width / 2, rotated.height / 2);
+                        ctx.rotate((orientation.degrees * Math.PI) / 180);
+                        ctx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+
+                        return rotated;
+                    }
+
+                    return canvas;
+                },
+
+                // MELHORIA 5: Pós-processamento de Texto (QUALIDADE ⭐⭐⭐)
+                postProcessText(text) {
+                    if (!text) return text;
+
+                    // Correções comuns de OCR em português
+                    // (Substituições de strings são feitas diretamente com replace abaixo)
+
+                    let processed = text;
+
+                    // Aplicar correções em contexto de palavras
+                    processed = processed.replace(/([a-z])0([a-z])/gi, '$1o$2'); // o em palavras
+                    processed = processed.replace(/([a-z])1([a-z])/gi, '$1l$2'); // l em palavras
+                    processed = processed.replace(/\s+/g, ' '); // espaços múltiplos
+                    processed = processed.replace(/\n{3,}/g, '\n\n'); // linhas múltiplas
+
+                    // Remover espaços antes de pontuação
+                    processed = processed.replace(/\s+([.,;:!?])/g, '$1');
+
+                    // Capitalizar após pontos
+                    processed = processed.replace(/\.\s+([a-z])/g, (match, letter) =>
+                        '. ' + letter.toUpperCase()
+                    );
+
+                    return processed.trim();
+                },
+
+                // MELHORIA 6: Parâmetros Otimizados por Modo
+                getOptimizedTesseractParams() {
+                    const baseParams = {
+                        tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
+                        preserve_interword_spaces: '1',
+                    };
+
+                    if (this.ocrMode === 'fast') {
+                        // Modo Turbo: sacrifica um pouco de qualidade por velocidade
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '3', // Fast neural net
+                            tessedit_pageseg_mode: '6',    // Bloco uniforme
+                            edges_max_children_per_outline: '10',
+                        };
+                    } else if (this.ocrMode === 'accurate') {
+                        // Modo Balanceado: melhor custo-benefício
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '1', // LSTM only
+                            textord_heavy_nr: '1',         // Remoção de ruído
+                        };
+                    } else if (this.ocrMode === 'best') {
+                        // Modo Máxima Qualidade: todas as otimizações
+                        return {
+                            ...baseParams,
+                            tessedit_ocr_engine_mode: '1',
+                            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÄÇÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜàáâãäçèéêëìíîïòóôõöùúûü .,;:!?-/()"\'',
+                            textord_heavy_nr: '1',
+                            classify_bln_numeric_mode: '0',
+                        };
+                    }
+
+                    return baseParams;
+                },
+
+                // MELHORIA 7: Pré-processamento Completo e Otimizado
+                async enhanceImageAdvanced(canvas) {
+                    if (!this.enhanceImage) return canvas;
+
+                    const context = canvas.getContext('2d');
+                    let imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+
+                    // 1. Remover ruído primeiro
+                    imageData = this.removeNoiseAdvanced(imageData);
+
+                    // 2. Aplicar binarização adaptativa (Otsu)
+                    imageData = this.applyOtsuBinarization(imageData);
+
+                    // 3. Aplicar sharpening leve
+                    const sharpened = this.applySharpen(imageData);
+
+                    context.putImageData(sharpened, 0, 0);
+
+                    return canvas;
+                },
+
+                applySharpen(imageData) {
+                    // Kernel de sharpening
+                    const kernel = [
+                        0, -1, 0,
+                        -1, 5, -1,
+                        0, -1, 0
+                    ];
+
+                    return this.applyConvolution(imageData, kernel);
+                },
+
+                applyConvolution(imageData, kernel) {
+                    const data = imageData.data;
+                    const width = imageData.width;
+                    const height = imageData.height;
+                    const output = new Uint8ClampedArray(data);
+
+                    for (let y = 1; y < height - 1; y++) {
+                        for (let x = 1; x < width - 1; x++) {
+                            let sum = 0;
+
+                            for (let ky = 0; ky < 3; ky++) {
+                                for (let kx = 0; kx < 3; kx++) {
+                                    const idx = ((y + ky - 1) * width + (x + kx - 1)) * 4;
+                                    sum += data[idx] * kernel[ky * 3 + kx];
+                                }
+                            }
+
+                            const idx = (y * width + x) * 4;
+                            const value = Math.max(0, Math.min(255, sum));
+                            output[idx] = output[idx + 1] = output[idx + 2] = value;
+                        }
+                    }
+
+                    // Criar novo ImageData e copiar dados processados
+                    const result = new ImageData(width, height);
+                    result.data.set(output);
+                    return result;
+                },
+
+                getTesseractParams() {
+                    const params = {
+                        tessedit_pageseg_mode: this.preserveLayout ? '3' : '6',
+                        preserve_interword_spaces: '1'
+                    };
+                    
+                    if (this.ocrMode === 'fast') {
+                        params.tessedit_ocr_engine_mode = '3';
+                    } else if (this.ocrMode === 'best') {
+                        params.tessedit_ocr_engine_mode = '1';
+                        params.tessedit_char_whitelist = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÁÂÃÄÇÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜàáâãäçèéêëìíîïòóôõöùúûü .,;:!?-/()"\'';
+                    }
+                    
+                    return params;
+                },
+                
+                enhanceImageQuality(context, width, height) {
+                    // Aplicar filtros para melhorar a qualidade da imagem
+                    const imageData = context.getImageData(0, 0, width, height);
+                    const data = imageData.data;
+                    
+                    // Aumentar contraste
+                    for (let i = 0; i < data.length; i += 4) {
+                        data[i] = this.adjustContrast(data[i], 1.5);     // Red
+                        data[i + 1] = this.adjustContrast(data[i + 1], 1.5); // Green
+                        data[i + 2] = this.adjustContrast(data[i + 2], 1.5); // Blue
+                    }
+                    
+                    // Binarização (preto e branco)
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        const binary = gray > 128 ? 255 : 0;
+                        data[i] = data[i + 1] = data[i + 2] = binary;
+                    }
+                    
+                    context.putImageData(imageData, 0, 0);
+                },
+                
+                adjustContrast(value, contrast) {
+                    return ((value / 255 - 0.5) * contrast + 0.5) * 255;
+                },
+                
+                compileResults() {
+                    // Compilar texto de todas as páginas
+                    this.extractedText = this.extractedPages
+                        .map(p => `--- Página ${p.pageNum} ---\n${p.text}`)
+                        .join('\n\n');
+                    
+                    // Calcular estatísticas
+                    const totalConfidence = this.extractedPages.reduce((sum, p) => sum + p.confidence, 0);
+                    this.averageConfidence = totalConfidence / this.extractedPages.length;
+                    
+                    this.wordCount = this.extractedText.split(/\s+/).filter(word => word.length > 0).length;
+                },
+                
+                // CORREÇÃO DO BUG: PDF Pesquisável com Layout Preservado
+                async downloadSearchablePDF() {
+                    try {
+                        this.processing = true;
+                        this.progressMessage = 'Gerando PDF pesquisável...';
+
+                        const { jsPDF } = window.jspdf;
+
+                        // Processar primeira página para determinar dimensões
+                        const firstPage = await this.pdfDocument.getPage(1);
+                        const firstViewport = firstPage.getViewport({ scale: 1 });
+
+                        // Criar PDF com dimensões corretas (pt = pontos, 72 DPI)
+                        const pdfWidth = firstViewport.width * 0.75; // Converter pixels para pontos
+                        const pdfHeight = firstViewport.height * 0.75;
+
+                        const pdf = new jsPDF({
+                            orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
+                            unit: 'pt',
+                            format: [pdfWidth, pdfHeight]
+                        });
+
+                        console.log('📄 Gerando PDF pesquisável...', {
+                            pages: this.extractedPages.length,
+                            pdfDimensions: { width: pdfWidth, height: pdfHeight }
+                        });
+
+                        // Processar cada página
+                        for (let i = 0; i < this.extractedPages.length; i++) {
+                            if (i > 0) pdf.addPage([pdfWidth, pdfHeight]);
+
+                            this.progress = ((i + 1) / this.extractedPages.length) * 100;
+                            this.progressMessage = `Gerando página ${i + 1}/${this.extractedPages.length}...`;
+
+                            // Renderizar imagem da página original
+                            const page = await this.pdfDocument.getPage(i + 1);
+                            const viewport = page.getViewport({ scale: 2 });
+
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+
+                            await page.render({
+                                canvasContext: context,
+                                viewport: viewport
+                            }).promise;
+
+                            // Adicionar imagem da página
+                            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, '', 'FAST');
+
+                            // CORREÇÃO: Adicionar texto com posicionamento correto
+                            const pageData = this.extractedPages[i];
+
+                            console.log(`📄 Página ${i + 1}:`, {
+                                hasWords: !!pageData.words,
+                                wordCount: pageData.words ? pageData.words.length : 0,
+                                sampleWord: pageData.words && pageData.words[0] ? pageData.words[0] : null
+                            });
+
+                            if (pageData.words && pageData.words.length > 0) {
+                                // Calcular fator de escala (coordenadas OCR -> coordenadas PDF)
+                                const scaleX = pdfWidth / viewport.width;
+                                const scaleY = pdfHeight / viewport.height;
+
+                                console.log(`📐 Escala página ${i + 1}:`, { scaleX, scaleY });
+
+                                let wordsAdded = 0;
+
+                                // Posicionar cada palavra nas coordenadas corretas
+                                for (const word of pageData.words) {
+                                    if (!word.text || word.text.trim() === '') continue;
+                                    if (!word.bbox) continue;
+
+                                    // Coordenadas da palavra (bbox = bounding box)
+                                    const bbox = word.bbox;
+                                    const x = bbox.x0 * scaleX;
+                                    const y = bbox.y0 * scaleY;
+                                    const wordWidth = (bbox.x1 - bbox.x0) * scaleX;
+                                    const wordHeight = (bbox.y1 - bbox.y0) * scaleY;
+
+                                    // Calcular tamanho da fonte baseado na altura da palavra
+                                    let fontSize = wordHeight * 0.8;
+                                    fontSize = Math.max(6, Math.min(fontSize, 72));
+
+                                    // Usar cor branca (invisível em fundo branco)
+                                    pdf.setTextColor(255, 255, 255);
+                                    pdf.setFontSize(fontSize);
+
+                                    // Adicionar palavra na posição exata
+                                    pdf.text(word.text, x, y + wordHeight);
+
+                                    wordsAdded++;
+                                }
+
+                                console.log(`✅ Página ${i + 1}: ${wordsAdded} palavras adicionadas`);
+
+                            } else {
+                                // Fallback: adicionar texto como bloco
+                                console.warn(`⚠️ Página ${i + 1}: sem coordenadas, usando texto completo`);
+
+                                pdf.setTextColor(255, 255, 255);
+                                pdf.setFontSize(8);
+
+                                const lines = pageData.text.split('\n');
+                                let y = 20;
+                                for (const line of lines) {
+                                    if (line.trim()) {
+                                        pdf.text(line, 10, y);
+                                        y += 10;
+                                        if (y > pdfHeight - 20) break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Salvar PDF
+                        const fileName = this.pdfFile.name.replace('.pdf', '_OCR_Pesquisavel.pdf');
+                        pdf.save(fileName);
+
+                        this.processing = false;
+                        this.showMessage('✅ PDF pesquisável com layout preservado gerado com sucesso!', 'success');
+
+                        console.log('✅ PDF gerado com sucesso:', fileName);
+                    } catch (error) {
+                        console.error('❌ Erro ao gerar PDF:', error);
+                        this.processing = false;
+                        this.showMessage('Erro ao gerar PDF: ' + error.message, 'error');
+                    }
+                },
+                
+                downloadText() {
+                    const blob = new Blob([this.extractedText], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = this.pdfFile.name.replace('.pdf', '_texto.txt');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    
+                    this.showMessage('Texto extraído baixado com sucesso!', 'success');
+                },
+                
+                resetApp() {
+                    this.pdfFile = null;
+                    this.pdfDocument = null;
+                    this.currentPage = 1;
+                    this.totalPages = 0;
+                    this.extractedText = '';
+                    this.extractedPages = [];
+                    this.ocrCompleted = false;
+                    this.averageConfidence = 0;
+                    this.wordCount = 0;
+                    this.processingTime = 0;
+                    this.$refs.fileInput.value = '';
+                },
+                
+                showMessage(message, color = 'success') {
+                    this.snackbarMessage = message;
+                    this.snackbarColor = color;
+                    this.snackbar = true;
+                }
+            }
+        }).use(vuetify).mount('#app');
+    </script>
+</body>
+</html>
