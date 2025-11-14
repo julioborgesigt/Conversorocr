@@ -11,6 +11,7 @@ const fs = require('fs').promises;
 // Cache da verificação de configuração
 let configCache = null;
 let lastCheckTime = 0;
+let workingPythonCommand = null; // Cachear qual comando Python funcionou
 const CACHE_DURATION = 60000; // 1 minuto
 
 /**
@@ -34,20 +35,31 @@ async function isConfigured() {
             const result = await testPythonCommand(pythonCommand);
             if (result) {
                 console.log(`✅ PaddleOCR detectado via ${pythonCommand}`);
+                workingPythonCommand = pythonCommand; // Salvar qual comando funcionou
                 configCache = true;
                 lastCheckTime = now;
                 return true;
             }
         }
 
+        workingPythonCommand = null; // Nenhum comando funcionou
         configCache = false;
         lastCheckTime = now;
         return false;
     } catch (error) {
+        workingPythonCommand = null;
         configCache = false;
         lastCheckTime = Date.now();
         return false;
     }
+}
+
+/**
+ * Retorna qual comando Python está funcionando (para debug)
+ * @returns {string|null}
+ */
+function getWorkingPythonCommand() {
+    return workingPythonCommand;
 }
 
 /**
@@ -133,13 +145,15 @@ async function processDocument(imagePath, language = 'por') {
             throw new Error('Script paddleocr_processor.py não encontrado');
         }
 
-        // Comando Python - tentar múltiplas versões no Windows (3.11, 3.12 são compatíveis)
-        // Python 3.14+ não é suportado pelo PaddlePaddle ainda
-        const pythonCommands = process.platform === 'win32'
-            ? ['py -3.11', 'py -3.12', 'python3.11', 'python3.12', 'python', 'python3']
-            : ['python3.11', 'python3.12', 'python3', 'python'];
+        // Usar o comando Python que foi validado na verificação
+        // Se PYTHON_COMMAND está definido no .env, usar ele (override manual)
+        // Caso contrário, usar o comando que funcionou na verificação
+        // Fallback: tentar python3 (Linux/Mac) ou python (Windows)
+        const pythonCommand = process.env.PYTHON_COMMAND
+            || workingPythonCommand
+            || (process.platform === 'win32' ? 'python' : 'python3');
 
-        const pythonCommand = process.env.PYTHON_COMMAND || pythonCommands[0];
+        console.log(`🐍 Usando comando Python: ${pythonCommand}`);
 
         // Executar script Python
         return new Promise((resolve, reject) => {
@@ -235,5 +249,6 @@ async function processDocument(imagePath, language = 'por') {
 
 module.exports = {
     processDocument,
-    isConfigured
+    isConfigured,
+    getWorkingPythonCommand
 };
