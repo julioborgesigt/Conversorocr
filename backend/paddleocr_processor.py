@@ -61,6 +61,15 @@ def process_image(image_path, lang='pt'):
         # Nota: cls=True foi removido nas versões 3.3+, use_angle_cls na inicialização já controla isso
         result = ocr.ocr(image_path)
 
+        # Debug: verificar formato do resultado
+        import sys
+        if result and result[0]:
+            sys.stderr.write(f"DEBUG: Resultado tem {len(result[0])} linhas\n")
+            if len(result[0]) > 0:
+                sys.stderr.write(f"DEBUG: Primeira linha: {result[0][0]}\n")
+                sys.stderr.write(f"DEBUG: Tipo da segunda parte: {type(result[0][0][1])}\n")
+        sys.stderr.flush()
+
         if not result or not result[0]:
             return {
                 'success': True,
@@ -80,38 +89,56 @@ def process_image(image_path, lang='pt'):
         word_count = 0
 
         for line in result[0]:
-            # Formato PaddleOCR: [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)]
-            box = line[0]  # Coordenadas do polígono
-            text_data = line[1]  # (texto, confiança)
-            text = text_data[0]
-            confidence = text_data[1]
+            try:
+                # Formato PaddleOCR: [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)]
+                # Nas versões 3.3+, pode ser: [box, [text, confidence]] ou [box, (text, confidence)]
+                if not line or len(line) < 2:
+                    continue
 
-            # Converter polígono para bbox (x0, y0, x1, y1)
-            x_coords = [point[0] for point in box]
-            y_coords = [point[1] for point in box]
+                box = line[0]  # Coordenadas do polígono
+                text_data = line[1]  # (texto, confiança) ou [texto, confiança]
 
-            x0 = int(min(x_coords))
-            y0 = int(min(y_coords))
-            x1 = int(max(x_coords))
-            y1 = int(max(y_coords))
+                # Extrair texto e confiança (suporta tupla ou lista)
+                if isinstance(text_data, (list, tuple)) and len(text_data) >= 2:
+                    text = str(text_data[0]) if text_data[0] else ""
+                    confidence = float(text_data[1]) if text_data[1] else 0.0
+                else:
+                    # Formato inesperado, pular
+                    continue
 
-            # Adicionar ao texto completo
-            full_text.append(text)
+                if not text:
+                    continue
 
-            # Adicionar palavra com coordenadas (compatível com Tesseract)
-            words.append({
-                'text': text,
-                'bbox': {
-                    'x0': x0,
-                    'y0': y0,
-                    'x1': x1,
-                    'y1': y1
-                },
-                'confidence': confidence * 100  # PaddleOCR retorna 0-1, converter para 0-100
-            })
+                # Converter polígono para bbox (x0, y0, x1, y1)
+                x_coords = [point[0] for point in box]
+                y_coords = [point[1] for point in box]
 
-            total_confidence += confidence
-            word_count += 1
+                x0 = int(min(x_coords))
+                y0 = int(min(y_coords))
+                x1 = int(max(x_coords))
+                y1 = int(max(y_coords))
+
+                # Adicionar ao texto completo
+                full_text.append(text)
+
+                # Adicionar palavra com coordenadas (compatível com Tesseract)
+                words.append({
+                    'text': text,
+                    'bbox': {
+                        'x0': x0,
+                        'y0': y0,
+                        'x1': x1,
+                        'y1': y1
+                    },
+                    'confidence': confidence * 100  # PaddleOCR retorna 0-1, converter para 0-100
+                })
+
+                total_confidence += confidence
+                word_count += 1
+
+            except (IndexError, TypeError, ValueError) as e:
+                # Pular linhas com formato inesperado
+                continue
 
         # Calcular confiança média
         avg_confidence = (total_confidence / word_count * 100) if word_count > 0 else 0
