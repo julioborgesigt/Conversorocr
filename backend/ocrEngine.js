@@ -1,15 +1,17 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 const documentAI = require('./documentAIWorker');
+const paddleOCR = require('./paddleOCRWorker');
 
 /**
  * Factory para selecionar o motor OCR apropriado
- * Suporta: Tesseract (local, grátis) e Document AI (nuvem, premium)
+ * Suporta: Tesseract (local, grátis), Document AI (nuvem, premium), PaddleOCR (local, rápido)
  */
 
 const OCR_ENGINES = {
     TESSERACT: 'tesseract',
     DOCUMENTAI: 'documentai',
+    PADDLEOCR: 'paddleocr',
     HYBRID: 'hybrid' // Tenta Document AI, fallback para Tesseract
 };
 
@@ -36,6 +38,9 @@ async function processImage(imagePath, engineOverride = null) {
     switch (engine) {
         case OCR_ENGINES.DOCUMENTAI:
             return await processWithDocumentAI(imagePath);
+
+        case OCR_ENGINES.PADDLEOCR:
+            return await processWithPaddleOCR(imagePath);
 
         case OCR_ENGINES.HYBRID:
             return await processHybrid(imagePath);
@@ -86,6 +91,28 @@ async function processWithDocumentAI(imagePath) {
 
     console.log(`🤖 Usando Google Document AI para: ${path.basename(imagePath)}`);
     return await documentAI.processDocument(imagePath);
+}
+
+/**
+ * Processa com PaddleOCR
+ * @param {string} imagePath
+ * @param {string} language
+ * @returns {Promise<Object>}
+ */
+async function processWithPaddleOCR(imagePath, language = 'por') {
+    const isAvailable = await paddleOCR.isConfigured();
+
+    if (!isAvailable) {
+        throw new Error(
+            '❌ PaddleOCR não está instalado.\n' +
+            'Instale Python 3 e execute:\n' +
+            '  pip install paddleocr pillow\n' +
+            'Ou use OCR_ENGINE=tesseract para modo gratuito.'
+        );
+    }
+
+    console.log(`🐼 Usando PaddleOCR para: ${path.basename(imagePath)}`);
+    return await paddleOCR.processDocument(imagePath, language);
 }
 
 /**
@@ -141,6 +168,15 @@ function getEngineInfo() {
             info.configured = documentAI.isConfigured();
             break;
 
+        case OCR_ENGINES.PADDLEOCR:
+            info.name = 'PaddleOCR';
+            info.description = 'OCR rápido e preciso (Baidu)';
+            info.cost = 'Grátis';
+            // Note: isConfigured é async, mas getEngineInfo é sync
+            // Verificação real acontece em getAllEngines
+            info.configured = true;
+            break;
+
         case OCR_ENGINES.HYBRID:
             info.name = 'Híbrido (Document AI → Tesseract)';
             info.description = 'Tenta Document AI, fallback para Tesseract';
@@ -162,10 +198,11 @@ function getEngineInfo() {
 
 /**
  * Retorna lista de todos os motores OCR disponíveis
- * @returns {Array<Object>}
+ * @returns {Promise<Array<Object>>}
  */
-function getAllEngines() {
+async function getAllEngines() {
     const documentAIConfigured = documentAI.isConfigured();
+    const paddleOCRConfigured = await paddleOCR.isConfigured();
     const defaultEngine = getConfiguredEngine();
 
     return [
@@ -183,6 +220,21 @@ function getAllEngines() {
             icon: '🔧'
         },
         {
+            id: 'paddleocr',
+            name: 'PaddleOCR',
+            description: 'OCR rápido da Baidu',
+            quality: '90-95%',
+            cost: 'Grátis',
+            speed: 'Rápido (1-3s/página)',
+            privacy: '100% Local',
+            features: ['Rápido', 'Preciso', 'Suporta múltiplos idiomas'],
+            available: paddleOCRConfigured,
+            recommended: paddleOCRConfigured,
+            icon: '🐼',
+            requiresConfig: !paddleOCRConfigured,
+            requiresPython: true
+        },
+        {
             id: 'documentai',
             name: 'Google Document AI',
             description: 'OCR premium na nuvem',
@@ -192,7 +244,7 @@ function getAllEngines() {
             privacy: 'Upload para Google Cloud',
             features: ['Alta qualidade', 'Tabelas', 'Fórmulas matemáticas'],
             available: documentAIConfigured,
-            recommended: documentAIConfigured,
+            recommended: documentAIConfigured && !paddleOCRConfigured,
             icon: '🤖',
             requiresConfig: !documentAIConfigured
         },

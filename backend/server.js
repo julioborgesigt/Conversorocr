@@ -509,12 +509,19 @@ app.get('/api/ocr-engine', (req, res) => {
 });
 
 // Rota para listar todos os motores OCR disponíveis
-app.get('/api/ocr-engines', (req, res) => {
-    const engines = ocrEngine.getAllEngines();
-    res.json({
-        success: true,
-        engines: engines
-    });
+app.get('/api/ocr-engines', async (req, res) => {
+    try {
+        const engines = await ocrEngine.getAllEngines();
+        res.json({
+            success: true,
+            engines: engines
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 // Análise rápida de PDF
