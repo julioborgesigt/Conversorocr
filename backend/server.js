@@ -442,7 +442,8 @@ app.post('/api/process-pdf-stream', upload.single('pdf'), async (req, res) => {
             language: req.body.language || 'por',
             mode: req.body.mode || 'accurate',
             enhanceImage: req.body.enhanceImage !== 'false',
-            preserveLayout: req.body.preserveLayout !== 'false'
+            preserveLayout: req.body.preserveLayout !== 'false',
+            ocrEngine: req.body.ocrEngine || null // Motor OCR selecionado pelo usuário
         };
 
         const processor = new OCRProcessor(options);
