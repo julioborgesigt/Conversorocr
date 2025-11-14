@@ -133,12 +133,19 @@ async function processDocument(imagePath, language = 'por') {
             throw new Error('Script paddleocr_processor.py não encontrado');
         }
 
-        // Comando Python (python3 no Linux/Mac, python no Windows)
-        const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+        // Comando Python - tentar múltiplas versões no Windows (3.11, 3.12 são compatíveis)
+        // Python 3.14+ não é suportado pelo PaddlePaddle ainda
+        const pythonCommands = process.platform === 'win32'
+            ? ['py -3.11', 'py -3.12', 'python3.11', 'python3.12', 'python', 'python3']
+            : ['python3.11', 'python3.12', 'python3', 'python'];
+
+        const pythonCommand = process.env.PYTHON_COMMAND || pythonCommands[0];
 
         // Executar script Python
         return new Promise((resolve, reject) => {
-            const python = spawn(pythonCommand, [scriptPath, imagePath, language]);
+            const python = spawn(pythonCommand, [scriptPath, imagePath, language], {
+                shell: true  // Necessário para comandos como "py -3.11"
+            });
 
             let stdoutData = '';
             let stderrData = '';

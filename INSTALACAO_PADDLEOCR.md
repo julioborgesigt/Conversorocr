@@ -4,16 +4,64 @@ PaddleOCR é um framework OCR open-source desenvolvido pela Baidu, conhecido por
 
 ---
 
+## ⚠️ IMPORTANTE: Compatibilidade de Versão Python
+
+**PaddlePaddle requer Python 3.8 até 3.12 (máximo)**
+
+- ✅ **Compatível:** Python 3.8, 3.9, 3.10, 3.11, 3.12
+- ❌ **NÃO compatível:** Python 3.14+ (muito recente, sem suporte ainda)
+
+**Se você tem Python 3.14+**, você precisa instalar Python 3.11 ou 3.12 em paralelo (veja instruções abaixo).
+
+---
+
 ## 📋 Pré-requisitos
 
-- **Python 3.7+** instalado no sistema
+- **Python 3.8 - 3.12** instalado no sistema
 - **pip** (gerenciador de pacotes Python)
 
 ---
 
 ## 🪟 Instalação no Windows
 
-### 1. Instalar Python
+### 0. Se você tem Python 3.14+ (Importante!)
+
+Se `python --version` mostra Python 3.14 ou superior, você precisa instalar Python 3.11 ou 3.12 em paralelo:
+
+**1. Baixe Python 3.11:**
+- Acesse: https://www.python.org/downloads/release/python-31110/
+- Role até o final e clique em **"Windows installer (64-bit)"**
+
+**2. Durante a instalação:**
+- ✅ Marque **"Add Python 3.11 to PATH"**
+- ✅ Clique em **"Customize installation"**
+- ✅ Na tela "Optional Features", marque todas as opções
+- ✅ Na tela "Advanced Options":
+  - Marque **"Install for all users"** (se quiser)
+  - Anote o caminho de instalação (ex: `C:\Python311`)
+
+**3. Após instalar, verifique:**
+```bash
+py -3.11 --version
+# Deve mostrar: Python 3.11.x
+```
+
+**4. Instale PaddlePaddle com Python 3.11:**
+```bash
+py -3.11 -m pip install paddlepaddle paddleocr pillow
+```
+
+**5. Configure no .env:**
+Edite `backend/.env` e adicione:
+```bash
+PYTHON_COMMAND=py -3.11
+```
+
+Pronto! Agora pule para a seção "Configurar no Projeto" abaixo.
+
+---
+
+### 1. Instalar Python (Se ainda não tem)
 
 Se você ainda não tem Python instalado:
 
