@@ -8,27 +8,44 @@ const fs = require('fs').promises;
  * Mantém compatibilidade com interface do ocrWorker.js (Tesseract)
  */
 
+// Cache da verificação de configuração
+let configCache = null;
+let lastCheckTime = 0;
+const CACHE_DURATION = 60000; // 1 minuto
+
 /**
- * Verifica se PaddleOCR está instalado
+ * Verifica se PaddleOCR está instalado (com cache)
  * @returns {Promise<boolean>}
  */
 async function isConfigured() {
     try {
+        // Usar cache se disponível e recente
+        const now = Date.now();
+        if (configCache !== null && (now - lastCheckTime) < CACHE_DURATION) {
+            return configCache;
+        }
+
         // Tentar vários comandos Python (python, python3, py)
         const pythonCommands = process.platform === 'win32'
-            ? ['python', 'py', 'python3']
+            ? ['python3', 'python', 'py']  // Ordem: python3 primeiro (você tem)
             : ['python3', 'python'];
 
         for (const pythonCommand of pythonCommands) {
             const result = await testPythonCommand(pythonCommand);
             if (result) {
                 console.log(`✅ PaddleOCR detectado via ${pythonCommand}`);
+                configCache = true;
+                lastCheckTime = now;
                 return true;
             }
         }
 
+        configCache = false;
+        lastCheckTime = now;
         return false;
     } catch (error) {
+        configCache = false;
+        lastCheckTime = Date.now();
         return false;
     }
 }
@@ -63,11 +80,11 @@ function testPythonCommand(pythonCommand) {
             resolve(false);
         });
 
-        // Timeout de 15 segundos (aumentado para primeira execução)
+        // Timeout de 30 segundos (primeira execução baixa modelos ~200MB)
         setTimeout(() => {
             check.kill();
             resolve(false);
-        }, 15000);
+        }, 30000);
     });
 }
 
