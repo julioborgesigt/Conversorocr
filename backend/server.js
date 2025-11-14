@@ -9,6 +9,7 @@ const pdfParse = require('pdf-parse');
 const cors = require('cors');
 const { Worker } = require('worker_threads');
 const os = require('os');
+const ocrEngine = require('./ocrEngine'); // Factory para Tesseract ou Document AI
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -165,40 +166,27 @@ Erro original: ${error.message}`);
         for (let i = 0; i < imagePaths.length; i += batchSize) {
             const batch = imagePaths.slice(i, i + batchSize);
 
-            // Criar workers para este lote
-            const workerPromises = batch.map(({ pageNum, path: imagePath }) => {
-                return new Promise((resolve, reject) => {
-                    const worker = new Worker(path.join(__dirname, 'ocrWorker.js'), {
-                        workerData: {
-                            imagePath: imagePath,
-                            language: this.language,
-                            params: params,
-                            enhanceImage: this.enhanceImage
-                        }
-                    });
+            // Criar workers para este lote (usa Tesseract ou Document AI via ocrEngine)
+            const workerPromises = batch.map(async ({ pageNum, path: imagePath }) => {
+                try {
+                    const result = await ocrEngine.processImage(imagePath);
 
-                    worker.on('message', (msg) => {
-                        if (msg.success) {
-                            resolve({
-                                pageNum,
-                                text: msg.data.text,
-                                confidence: msg.data.confidence,
-                                words: msg.data.words,
-                                imageWidth: msg.data.imageWidth,   // Dimensões dinâmicas da imagem
-                                imageHeight: msg.data.imageHeight  // Para cálculo correto de escala
-                            });
-                        } else {
-                            reject(new Error(msg.error));
-                        }
-                    });
-
-                    worker.on('error', reject);
-                    worker.on('exit', (code) => {
-                        if (code !== 0) {
-                            reject(new Error(`Worker stopped with exit code ${code}`));
-                        }
-                    });
-                });
+                    if (result.success) {
+                        return {
+                            pageNum,
+                            text: result.data.text,
+                            confidence: result.data.confidence,
+                            words: result.data.words,
+                            imageWidth: result.data.imageWidth,   // Dimensões dinâmicas da imagem
+                            imageHeight: result.data.imageHeight  // Para cálculo correto de escala
+                        };
+                    } else {
+                        throw new Error(result.error);
+                    }
+                } catch (error) {
+                    console.error(`❌ Erro ao processar página ${pageNum}:`, error.message);
+                    throw error;
+                }
             });
 
             // Aguardar lote completar
@@ -507,6 +495,15 @@ app.get('/api/system-info', (req, res) => {
     });
 });
 
+// Rota para obter informações do motor OCR
+app.get('/api/ocr-engine', (req, res) => {
+    const engineInfo = ocrEngine.getEngineInfo();
+    res.json({
+        success: true,
+        engine: engineInfo
+    });
+});
+
 // Análise rápida de PDF
 app.post('/api/analyze-pdf', upload.single('pdf'), async (req, res) => {
     try {
@@ -556,6 +553,18 @@ app.post('/api/enhance-image', upload.single('image'), async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Servidor OCR rodando na porta ${PORT}`);
     console.log(`Acesse: http://localhost:${PORT}`);
+
+    // Mostrar motor OCR configurado
+    const engineInfo = ocrEngine.getEngineInfo();
+    console.log(`\n🔧 Motor OCR: ${engineInfo.name}`);
+    console.log(`   Descrição: ${engineInfo.description}`);
+    console.log(`   Custo: ${engineInfo.cost}`);
+    if (!engineInfo.configured) {
+        console.log(`   ⚠️ Status: NÃO CONFIGURADO - verifique variáveis de ambiente`);
+    } else {
+        console.log(`   ✅ Status: Configurado`);
+    }
+    console.log('');
 });
 
 // Tratamento de erros não capturados

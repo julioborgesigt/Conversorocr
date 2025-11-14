@@ -1,6 +1,6 @@
 {
   "name": "ocr-pdf-processor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sistema avançado de OCR para processos digitalizados com pré-processamento de imagem e criação de PDFs pesquisáveis",
   "main": "server.js",
   "scripts": {
@@ -25,7 +25,8 @@
     "sharp": "^0.33.0",
     "pdf2pic": "^3.0.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "@google-cloud/documentai": "^8.9.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
