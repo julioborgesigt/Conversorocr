@@ -48,15 +48,13 @@ def process_image(image_path, lang='pt'):
                 'error': 'Não foi possível obter dimensões da imagem'
             }
 
-        # Inicializar PaddleOCR
+        # Inicializar PaddleOCR (parâmetros compatíveis com todas as versões)
         # use_angle_cls=True: detecta e corrige rotação de texto
-        # use_gpu=False: usar CPU (GPU requer CUDA)
         # lang: idioma do modelo
+        # Nota: use_gpu e show_log foram removidos por compatibilidade
         ocr = PaddleOCR(
             use_angle_cls=True,
-            lang=lang,
-            use_gpu=False,
-            show_log=False
+            lang=lang
         )
 
         # Processar imagem
