@@ -51,6 +51,7 @@ class OCRProcessor {
         this.mode = options.mode || 'accurate';
         this.enhanceImage = options.enhanceImage !== false;
         this.preserveLayout = options.preserveLayout !== false;
+        this.selectedEngine = options.ocrEngine || null; // null = usa padrão do .env
     }
 
     // REMOVIDO: preprocessImage destrutivo (usava resize 2x, threshold fixo e negate)
@@ -170,7 +171,7 @@ Erro original: ${error.message}`);
             // Criar workers para este lote (usa Tesseract ou Document AI via ocrEngine)
             const workerPromises = batch.map(async ({ pageNum, path: imagePath }) => {
                 try {
-                    const result = await ocrEngine.processImage(imagePath);
+                    const result = await ocrEngine.processImage(imagePath, this.selectedEngine);
 
                     if (result.success) {
                         return {
@@ -363,7 +364,8 @@ app.post('/api/process-pdf-parallel', upload.single('pdf'), async (req, res) => 
             language: req.body.language || 'por',
             mode: req.body.mode || 'accurate',
             enhanceImage: req.body.enhanceImage !== 'false',
-            preserveLayout: req.body.preserveLayout !== 'false'
+            preserveLayout: req.body.preserveLayout !== 'false',
+            ocrEngine: req.body.ocrEngine || null // Motor OCR selecionado pelo usuário
         };
 
         const processor = new OCRProcessor(options);
@@ -496,12 +498,21 @@ app.get('/api/system-info', (req, res) => {
     });
 });
 
-// Rota para obter informações do motor OCR
+// Rota para obter informações do motor OCR configurado
 app.get('/api/ocr-engine', (req, res) => {
     const engineInfo = ocrEngine.getEngineInfo();
     res.json({
         success: true,
         engine: engineInfo
+    });
+});
+
+// Rota para listar todos os motores OCR disponíveis
+app.get('/api/ocr-engines', (req, res) => {
+    const engines = ocrEngine.getAllEngines();
+    res.json({
+        success: true,
+        engines: engines
     });
 });
 

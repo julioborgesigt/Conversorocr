@@ -23,12 +23,15 @@ function getConfiguredEngine() {
 }
 
 /**
- * Processa uma imagem usando o motor configurado
+ * Processa uma imagem usando o motor configurado ou especificado
  * @param {string} imagePath - Caminho para a imagem
+ * @param {string} [engineOverride] - Motor específico (sobrescreve .env)
  * @returns {Promise<Object>} - Resultado do OCR
  */
-async function processImage(imagePath) {
-    const engine = getConfiguredEngine();
+async function processImage(imagePath, engineOverride = null) {
+    const engine = engineOverride ? engineOverride.toLowerCase() : getConfiguredEngine();
+
+    console.log(`🔧 Motor OCR selecionado: ${engine}`);
 
     switch (engine) {
         case OCR_ENGINES.DOCUMENTAI:
@@ -157,8 +160,64 @@ function getEngineInfo() {
     return info;
 }
 
+/**
+ * Retorna lista de todos os motores OCR disponíveis
+ * @returns {Array<Object>}
+ */
+function getAllEngines() {
+    const documentAIConfigured = documentAI.isConfigured();
+    const defaultEngine = getConfiguredEngine();
+
+    return [
+        {
+            id: 'tesseract',
+            name: 'Tesseract.js',
+            description: 'OCR local gratuito',
+            quality: '85-90%',
+            cost: 'Grátis',
+            speed: 'Médio (3-5s/página)',
+            privacy: '100% Local',
+            features: ['Gratuito', 'Offline', 'Privado'],
+            available: true,
+            recommended: false,
+            icon: '🔧'
+        },
+        {
+            id: 'documentai',
+            name: 'Google Document AI',
+            description: 'OCR premium na nuvem',
+            quality: '95-99%',
+            cost: 'US$ 1,50 / 1000 páginas',
+            speed: 'Rápido (1-2s/página)',
+            privacy: 'Upload para Google Cloud',
+            features: ['Alta qualidade', 'Tabelas', 'Fórmulas matemáticas'],
+            available: documentAIConfigured,
+            recommended: documentAIConfigured,
+            icon: '🤖',
+            requiresConfig: !documentAIConfigured
+        },
+        {
+            id: 'hybrid',
+            name: 'Modo Híbrido',
+            description: 'Document AI com fallback',
+            quality: '95-99% ou 85-90%',
+            cost: 'Variável',
+            speed: 'Variável',
+            privacy: 'Depende do motor usado',
+            features: ['Melhor dos dois mundos', 'Sempre funciona', 'Inteligente'],
+            available: true,
+            recommended: false,
+            icon: '🔄'
+        }
+    ].map(engine => ({
+        ...engine,
+        isDefault: engine.id === defaultEngine
+    }));
+}
+
 module.exports = {
     processImage,
     getEngineInfo,
+    getAllEngines,
     OCR_ENGINES
 };
