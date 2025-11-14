@@ -469,8 +469,8 @@
                             formData.append('ocrEngine', this.selectedOcrEngine);
                         }
 
-                        // Enviar para API com progress
-                        const response = await fetch('http://localhost:3000/api/process-pdf-parallel', {
+                        // Usar SSE para progresso em tempo real
+                        const response = await fetch('http://localhost:3000/api/process-pdf-stream', {
                             method: 'POST',
                             body: formData
                         });
@@ -479,27 +479,137 @@
                             throw new Error('Erro no processamento: ' + response.statusText);
                         }
 
-                        const result = await response.json();
+                        // Processar stream SSE manualmente
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
 
-                        // Processar resultado
-                        this.extractedText = result.text;
-                        this.searchablePdfData = result.searchablePdf;
-                        this.statistics = result.statistics;
-                        this.totalPages = result.statistics.pageCount;
-                        this.processingTime = result.statistics.processingTime;
+                        while (true) {
+                            const { done, value } = await reader.read();
 
-                        this.ocrCompleted = true;
-                        this.progress = 100;
-                        this.showMessage('✅ OCR concluído com sucesso!', 'success');
+                            if (done) break;
 
-                        // CORREÇÃO: Mover processing = false para o final do try
-                        // (estava no finally, sendo executado antes do fetch terminar)
-                        this.processing = false;
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+
+                            // Processar linhas completas, manter linha incompleta no buffer
+                            buffer = lines.pop() || '';
+
+                            for (const line of lines) {
+                                if (line.startsWith('event:')) {
+                                    const eventType = line.substring(6).trim();
+                                    continue;
+                                } else if (line.startsWith('data:')) {
+                                    const data = JSON.parse(line.substring(5).trim());
+                                    this.handleSSEEvent(data);
+                                }
+                            }
+                        }
 
                     } catch (error) {
                         console.error('Erro no OCR:', error);
                         this.showMessage('Erro no processamento: ' + error.message, 'error');
-                        this.processing = false; // Manter aqui também para caso de erro
+                        this.processing = false;
+                    }
+                },
+
+                handleSSEEvent(data) {
+                    // Eventos SSE: start, progress, complete, error
+
+                    if (data.message) {
+                        // Evento 'start'
+                        this.progressMessage = data.message;
+                    }
+
+                    if (data.current !== undefined && data.total !== undefined) {
+                        // Evento 'progress'
+                        this.progress = parseFloat(data.percentage);
+                        this.progressMessage = `Processando página ${data.current} de ${data.total} (${data.percentage}%)`;
+                        this.performanceMetrics.pagesProcessed = data.current;
+
+                        // Calcular páginas por segundo
+                        if (data.elapsed > 0) {
+                            this.performanceMetrics.pagesPerSecond = (data.current / parseFloat(data.elapsed)).toFixed(2);
+
+                            // Estimar tempo restante
+                            const pagesRemaining = data.total - data.current;
+                            const secondsPerPage = parseFloat(data.elapsed) / data.current;
+                            this.performanceMetrics.estimatedTimeRemaining = (pagesRemaining * secondsPerPage).toFixed(0);
+                        }
+                    }
+
+                    if (data.success && data.pages) {
+                        // Evento 'complete'
+                        this.progress = 100;
+                        this.progressMessage = 'Finalizando...';
+
+                        // Processar resultado
+                        this.extractedText = data.totalText;
+                        this.totalPages = data.pages.length;
+                        this.processingTime = data.processingTime;
+
+                        // Calcular estatísticas
+                        const totalWords = data.totalText.split(/\s+/).length;
+                        const avgConfidence = data.pages.reduce((sum, p) => sum + (p.confidence || 0), 0) / data.pages.length;
+
+                        this.statistics = {
+                            pageCount: data.pages.length,
+                            totalWords: totalWords,
+                            averageConfidence: avgConfidence
+                        };
+
+                        // Se precisar do PDF pesquisável, fazer requisição separada
+                        if (this.outputFormat === 'searchable_pdf' || this.outputFormat === 'both') {
+                            this.requestSearchablePDF();
+                        } else {
+                            this.ocrCompleted = true;
+                            this.processing = false;
+                            this.showMessage('✅ OCR concluído com sucesso!', 'success');
+                        }
+                    }
+
+                    if (data.error) {
+                        // Evento 'error'
+                        throw new Error(data.error);
+                    }
+                },
+
+                async requestSearchablePDF() {
+                    // Fazer nova requisição para gerar PDF pesquisável
+                    // (SSE não suporta enviar dados binários grandes)
+                    try {
+                        this.progressMessage = 'Gerando PDF pesquisável...';
+
+                        const formData = new FormData();
+                        formData.append('pdf', this.pdfFile);
+                        formData.append('language', this.ocrLanguage);
+                        formData.append('mode', this.ocrMode);
+                        formData.append('outputFormat', this.outputFormat);
+                        formData.append('enhanceImage', this.enhanceImage);
+                        formData.append('preserveLayout', this.preserveLayout);
+
+                        if (this.selectedOcrEngine) {
+                            formData.append('ocrEngine', this.selectedOcrEngine);
+                        }
+
+                        const response = await fetch('http://localhost:3000/api/process-pdf-parallel', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const result = await response.json();
+                        this.searchablePdfData = result.searchablePdf;
+
+                        this.ocrCompleted = true;
+                        this.processing = false;
+                        this.showMessage('✅ OCR concluído com sucesso!', 'success');
+
+                    } catch (error) {
+                        console.error('Erro ao gerar PDF pesquisável:', error);
+                        // Mesmo com erro, mostrar texto extraído
+                        this.ocrCompleted = true;
+                        this.processing = false;
+                        this.showMessage('✅ Texto extraído com sucesso! (PDF pesquisável falhou)', 'warning');
                     }
                 },
 
