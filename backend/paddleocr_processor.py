@@ -58,7 +58,8 @@ def process_image(image_path, lang='pt'):
         )
 
         # Processar imagem
-        result = ocr.ocr(image_path, cls=True)
+        # Nota: cls=True foi removido nas versões 3.3+, use_angle_cls na inicialização já controla isso
+        result = ocr.ocr(image_path)
 
         if not result or not result[0]:
             return {
