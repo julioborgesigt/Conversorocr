@@ -30,27 +30,42 @@ pip --version
 # Deve mostrar: pip x.x.x
 ```
 
-### 2. Instalar PaddleOCR
+### 2. Instalar PaddleOCR e Dependências
 
 Abra o **PowerShell** ou **CMD** e execute:
 
 ```bash
-pip install paddleocr pillow
+# Passo 1: Instalar PaddlePaddle (framework base)
+python -m pip install paddlepaddle
+
+# Passo 2: Instalar PaddleOCR e Pillow
+python -m pip install paddleocr pillow
 ```
 
 Isso vai instalar:
+- `paddlepaddle`: Framework de Deep Learning da Baidu (base)
 - `paddleocr`: Framework OCR
 - `pillow`: Biblioteca de processamento de imagens
 
-**Nota:** A primeira instalação pode demorar ~5 minutos e baixar ~500MB de dependências.
+**Nota:** A primeira instalação pode demorar ~5-10 minutos e baixar ~500MB de dependências.
+
+**Alternativa (mirror mais rápido):**
+```bash
+python -m pip install paddlepaddle -i https://mirror.baidu.com/pypi/simple
+python -m pip install paddleocr pillow
+```
 
 ### 3. Verificar Instalação
 
 ```bash
+# Verificar PaddlePaddle
+python -c "import paddle; print('PaddlePaddle OK:', paddle.__version__)"
+
+# Verificar PaddleOCR
 python -c "import paddleocr; print('PaddleOCR instalado com sucesso!')"
 ```
 
-Se aparecer a mensagem, está pronto! ✅
+Se ambas as mensagens aparecerem, está pronto! ✅
 
 ---
 
@@ -63,11 +78,12 @@ Se aparecer a mensagem, está pronto! ✅
 sudo apt-get update
 sudo apt-get install python3 python3-pip
 
-# Instalar PaddleOCR
-pip3 install paddleocr pillow
+# Instalar PaddlePaddle e PaddleOCR
+pip3 install paddlepaddle paddleocr pillow
 
 # Verificar
-python3 -c "import paddleocr; print('OK')"
+python3 -c "import paddle; print('PaddlePaddle OK')"
+python3 -c "import paddleocr; print('PaddleOCR OK')"
 ```
 
 ### CentOS/RHEL
@@ -76,8 +92,8 @@ python3 -c "import paddleocr; print('OK')"
 # Instalar Python 3
 sudo yum install python3 python3-pip
 
-# Instalar PaddleOCR
-pip3 install paddleocr pillow
+# Instalar PaddlePaddle e PaddleOCR
+pip3 install paddlepaddle paddleocr pillow
 ```
 
 ---
@@ -88,11 +104,12 @@ pip3 install paddleocr pillow
 # Instalar Python 3 (via Homebrew)
 brew install python3
 
-# Instalar PaddleOCR
-pip3 install paddleocr pillow
+# Instalar PaddlePaddle e PaddleOCR
+pip3 install paddlepaddle paddleocr pillow
 
 # Verificar
-python3 -c "import paddleocr; print('OK')"
+python3 -c "import paddle; print('PaddlePaddle OK')"
+python3 -c "import paddleocr; print('PaddleOCR OK')"
 ```
 
 ---
@@ -208,12 +225,25 @@ use_gpu=True  # Ao invés de False
 
 ## 🐛 Solução de Problemas
 
+### Erro: "No module named 'paddle'"
+
+**Causa:** PaddleOCR instalado mas falta o PaddlePaddle (framework base)
+
+**Solução:**
+```bash
+# Instalar PaddlePaddle
+python -m pip install paddlepaddle
+
+# Verificar
+python -c "import paddle; print('OK')"
+```
+
 ### Erro: "No module named 'paddleocr'"
 
 ```bash
-# Reinstalar
-pip uninstall paddleocr pillow
-pip install paddleocr pillow
+# Reinstalar PaddlePaddle e PaddleOCR
+pip uninstall paddlepaddle paddleocr pillow
+pip install paddlepaddle paddleocr pillow
 ```
 
 ### Erro: "Python not found"
