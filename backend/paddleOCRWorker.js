@@ -14,34 +14,61 @@ const fs = require('fs').promises;
  */
 async function isConfigured() {
     try {
-        // Verificar se Python está disponível
-        const pythonCommand = process.platform === 'win32' ? 'python' : 'python3';
+        // Tentar vários comandos Python (python, python3, py)
+        const pythonCommands = process.platform === 'win32'
+            ? ['python', 'py', 'python3']
+            : ['python3', 'python'];
 
-        return new Promise((resolve) => {
-            const check = spawn(pythonCommand, ['-c', 'import paddleocr; print("OK")']);
+        for (const pythonCommand of pythonCommands) {
+            const result = await testPythonCommand(pythonCommand);
+            if (result) {
+                console.log(`✅ PaddleOCR detectado via ${pythonCommand}`);
+                return true;
+            }
+        }
 
-            let output = '';
-            check.stdout.on('data', (data) => {
-                output += data.toString();
-            });
-
-            check.on('close', (code) => {
-                resolve(code === 0 && output.includes('OK'));
-            });
-
-            check.on('error', () => {
-                resolve(false);
-            });
-
-            // Timeout de 5 segundos
-            setTimeout(() => {
-                check.kill();
-                resolve(false);
-            }, 5000);
-        });
+        return false;
     } catch (error) {
         return false;
     }
+}
+
+/**
+ * Testa se PaddleOCR está disponível via comando Python específico
+ * @param {string} pythonCommand
+ * @returns {Promise<boolean>}
+ */
+function testPythonCommand(pythonCommand) {
+    return new Promise((resolve) => {
+        const check = spawn(pythonCommand, ['-c', 'import paddleocr; print("OK")'], {
+            shell: true  // Importante para Windows
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        check.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        check.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        check.on('close', (code) => {
+            resolve(code === 0 && stdout.includes('OK'));
+        });
+
+        check.on('error', () => {
+            resolve(false);
+        });
+
+        // Timeout de 15 segundos (aumentado para primeira execução)
+        setTimeout(() => {
+            check.kill();
+            resolve(false);
+        }, 15000);
+    });
 }
 
 /**
