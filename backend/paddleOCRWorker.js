@@ -52,39 +52,61 @@ async function isConfigured() {
 
 /**
  * Testa se PaddleOCR está disponível via comando Python específico
+ * Usa 'pip show' ao invés de 'import' para evitar download de modelos
  * @param {string} pythonCommand
  * @returns {Promise<boolean>}
  */
 function testPythonCommand(pythonCommand) {
     return new Promise((resolve) => {
-        const check = spawn(pythonCommand, ['-c', 'import paddleocr; print("OK")'], {
-            shell: true  // Importante para Windows
+        // Primeiro verificar se Python existe
+        const pythonCheck = spawn(pythonCommand, ['--version'], {
+            shell: true
         });
 
-        let stdout = '';
-        let stderr = '';
-
-        check.stdout.on('data', (data) => {
-            stdout += data.toString();
-        });
-
-        check.stderr.on('data', (data) => {
-            stderr += data.toString();
-        });
-
-        check.on('close', (code) => {
-            resolve(code === 0 && stdout.includes('OK'));
-        });
-
-        check.on('error', () => {
+        pythonCheck.on('error', () => {
             resolve(false);
         });
 
-        // Timeout de 30 segundos (primeira execução baixa modelos ~200MB)
+        pythonCheck.on('close', (code) => {
+            if (code !== 0) {
+                resolve(false);
+                return;
+            }
+
+            // Python existe, agora verificar se paddleocr está instalado
+            // Usar 'pip show' é MUITO mais rápido que importar (não baixa modelos)
+            const pipCommand = pythonCommand === 'py' ? 'pip' : `${pythonCommand} -m pip`;
+            const pipCheck = spawn(pipCommand, ['show', 'paddleocr'], {
+                shell: true
+            });
+
+            let stdout = '';
+
+            pipCheck.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            pipCheck.on('close', (pipCode) => {
+                // Se 'pip show paddleocr' retornar 0 e tiver "Name: paddleocr", está instalado
+                resolve(pipCode === 0 && stdout.includes('Name: paddleocr'));
+            });
+
+            pipCheck.on('error', () => {
+                resolve(false);
+            });
+
+            // Timeout curto (5s) pois pip show é rápido
+            setTimeout(() => {
+                pipCheck.kill();
+                resolve(false);
+            }, 5000);
+        });
+
+        // Timeout para verificação do Python
         setTimeout(() => {
-            check.kill();
+            pythonCheck.kill();
             resolve(false);
-        }, 30000);
+        }, 3000);
     });
 }
 
