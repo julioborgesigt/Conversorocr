@@ -159,7 +159,13 @@ async function processDocument(imagePath, language = 'por') {
             });
 
             python.on('close', (code) => {
+                // Sempre mostrar stderr (pode ter warnings/debug mesmo com sucesso)
+                if (stderrData) {
+                    console.log('PaddleOCR stderr:', stderrData);
+                }
+
                 if (code !== 0) {
+                    console.error('❌ PaddleOCR falhou com código:', code);
                     console.error('PaddleOCR stderr:', stderrData);
 
                     // Erro específico: módulo não instalado
@@ -172,6 +178,15 @@ async function processDocument(imagePath, language = 'por') {
                     }
 
                     return reject(new Error(`PaddleOCR falhou com código ${code}: ${stderrData}`));
+                }
+
+                // Debug: mostrar o que recebemos
+                console.log('PaddleOCR stdout length:', stdoutData.length);
+                console.log('PaddleOCR stdout (primeiros 500 chars):', stdoutData.substring(0, 500));
+
+                if (!stdoutData || stdoutData.trim().length === 0) {
+                    console.error('❌ PaddleOCR retornou stdout vazio!');
+                    return reject(new Error('PaddleOCR não retornou dados'));
                 }
 
                 try {
