@@ -1,4 +1,5 @@
 // server.js - Backend Node.js para OCR Avançado de PDFs com Processamento Paralelo
+require('dotenv').config(); // Carregar variáveis de ambiente do .env
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
