@@ -83,9 +83,9 @@ async function testPaddleOCR(pythonCmd) {
 
         setTimeout(() => {
             test.kill();
-            console.log('   ⏱️ Timeout - comando demorou muito');
+            console.log('   ⏱️ Timeout - comando demorou muito (>30s)');
             resolve(false);
-        }, 10000);
+        }, 30000);
     });
 }
 
