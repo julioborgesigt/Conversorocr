@@ -51,7 +51,12 @@ async function testPaddleOCR(pythonCmd) {
     console.log(`\n2️⃣ Testando PaddleOCR com ${pythonCmd}...`);
 
     return new Promise((resolve) => {
-        const test = spawn(pythonCmd, ['-c', 'import paddleocr; print("OK")']);
+        // Usar 'pip show' ao invés de 'import' (muito mais rápido!)
+        const pipCommand = pythonCmd === 'py' ? 'pip' : `${pythonCmd} -m pip`;
+        const test = spawn(pipCommand, ['show', 'paddleocr'], {
+            shell: true
+        });
+
         let stdout = '';
         let stderr = '';
 
@@ -64,8 +69,13 @@ async function testPaddleOCR(pythonCmd) {
         });
 
         test.on('close', (code) => {
-            if (code === 0 && stdout.includes('OK')) {
-                console.log('   ✅ PaddleOCR está instalado e funcionando!');
+            if (code === 0 && stdout.includes('Name: paddleocr')) {
+                console.log('   ✅ PaddleOCR está instalado!');
+                // Extrair versão
+                const versionMatch = stdout.match(/Version: (.+)/);
+                if (versionMatch) {
+                    console.log(`   📦 Versão: ${versionMatch[1]}`);
+                }
                 resolve(true);
             } else {
                 console.log('   ❌ PaddleOCR NÃO está instalado');
@@ -81,11 +91,12 @@ async function testPaddleOCR(pythonCmd) {
             resolve(false);
         });
 
+        // Timeout curto (5s) pois pip show é rápido
         setTimeout(() => {
             test.kill();
-            console.log('   ⏱️ Timeout - comando demorou muito (>30s)');
+            console.log('   ⏱️ Timeout - pip show demorou muito');
             resolve(false);
-        }, 30000);
+        }, 5000);
     });
 }
 
