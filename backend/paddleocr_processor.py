@@ -63,12 +63,18 @@ def process_image(image_path, lang='pt'):
 
         # Debug: verificar formato do resultado
         import sys
-        if result and result[0]:
-            sys.stderr.write(f"DEBUG: Resultado tem {len(result[0])} linhas\n")
-            if len(result[0]) > 0:
-                sys.stderr.write(f"DEBUG: Primeira linha: {result[0][0]}\n")
-                sys.stderr.write(f"DEBUG: Tipo da segunda parte: {type(result[0][0][1])}\n")
-        sys.stderr.flush()
+        import traceback
+        try:
+            if result and result[0]:
+                sys.stderr.write(f"DEBUG: Resultado tem {len(result[0])} linhas\n")
+                if len(result[0]) > 0:
+                    sys.stderr.write(f"DEBUG: Primeira linha: {result[0][0]}\n")
+                    sys.stderr.write(f"DEBUG: Tipo da segunda parte: {type(result[0][0][1])}\n")
+                sys.stderr.flush()
+        except Exception as debug_error:
+            sys.stderr.write(f"DEBUG ERROR: {debug_error}\n")
+            sys.stderr.write(f"DEBUG TRACEBACK: {traceback.format_exc()}\n")
+            sys.stderr.flush()
 
         if not result or not result[0]:
             return {
@@ -155,9 +161,16 @@ def process_image(image_path, lang='pt'):
         }
 
     except Exception as e:
+        import sys
+        import traceback
+        # Mostrar traceback completo no stderr
+        sys.stderr.write(f"ERRO FATAL: {type(e).__name__}: {str(e)}\n")
+        sys.stderr.write(f"TRACEBACK:\n{traceback.format_exc()}\n")
+        sys.stderr.flush()
+
         return {
             'success': False,
-            'error': str(e)
+            'error': f"{type(e).__name__}: {str(e)}"
         }
 
 def main():
