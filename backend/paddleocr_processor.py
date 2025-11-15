@@ -48,56 +48,15 @@ def process_image(image_path, lang='pt'):
                 'error': 'Não foi possível obter dimensões da imagem'
             }
 
-        # Inicializar PaddleOCR (parâmetros compatíveis com todas as versões)
-        # use_angle_cls=True: detecta e corrige rotação de texto
-        # lang: idioma do modelo
-        # Nota: use_gpu e show_log foram removidos por compatibilidade
+        # Inicializar PaddleOCR
+        # use_textline_orientation substitui use_angle_cls (deprecated)
         ocr = PaddleOCR(
-            use_angle_cls=True,
+            use_textline_orientation=True,
             lang=lang
         )
 
         # Processar imagem
-        # Nota: cls=True foi removido nas versões 3.3+, use_angle_cls na inicialização já controla isso
         result = ocr.ocr(image_path)
-
-        # Debug: verificar formato do resultado
-        import sys
-        import traceback
-        try:
-            sys.stderr.write(f"DEBUG: Tipo de result: {type(result)}\n")
-            sys.stderr.write(f"DEBUG: Comprimento de result: {len(result) if result else 0}\n")
-
-            if result:
-                sys.stderr.write(f"DEBUG: Tipo de result[0]: {type(result[0])}\n")
-                sys.stderr.write(f"DEBUG: Tipo do nome da classe: {type(result[0]).__name__}\n")
-
-                # PaddleOCR 3.3+ retorna objeto OCRResult (PaddleX), não lista
-                # Verificar se é objeto OCRResult
-                if hasattr(result[0], '__dict__'):
-                    sys.stderr.write(f"DEBUG: Atributos do result[0]: {list(result[0].__dict__.keys())[:10]}\n")
-
-                # Se for OCRResult do PaddleX, acessar corretamente
-                if type(result[0]).__name__ == 'OCRResult':
-                    sys.stderr.write("DEBUG: result[0] é um OCRResult do PaddleX!\n")
-
-                    # Tentar acessar propriedades comuns do OCRResult
-                    if hasattr(result[0], 'dt_polys'):
-                        sys.stderr.write(f"DEBUG: result[0].dt_polys existe, tipo: {type(result[0].dt_polys)}\n")
-                        sys.stderr.write(f"DEBUG: Tamanho de dt_polys: {len(result[0].dt_polys) if hasattr(result[0].dt_polys, '__len__') else 'N/A'}\n")
-                    if hasattr(result[0], 'rec_text'):
-                        sys.stderr.write(f"DEBUG: result[0].rec_text existe, tipo: {type(result[0].rec_text)}\n")
-                        sys.stderr.write(f"DEBUG: Tamanho de rec_text: {len(result[0].rec_text) if hasattr(result[0].rec_text, '__len__') else 'N/A'}\n")
-                    if hasattr(result[0], 'rec_score'):
-                        sys.stderr.write(f"DEBUG: result[0].rec_score existe, tipo: {type(result[0].rec_score)}\n")
-                    if hasattr(result[0], 'dt_boxes'):
-                        sys.stderr.write(f"DEBUG: result[0].dt_boxes existe\n")
-
-            sys.stderr.flush()
-        except Exception as debug_error:
-            sys.stderr.write(f"DEBUG ERROR: {debug_error}\n")
-            sys.stderr.write(f"DEBUG TRACEBACK: {traceback.format_exc()}\n")
-            sys.stderr.flush()
 
         if not result or not result[0]:
             return {
@@ -117,131 +76,132 @@ def process_image(image_path, lang='pt'):
         total_confidence = 0
         word_count = 0
 
-        # Verificar se é objeto OCRResult do PaddleX (versão 3.3+)
-        if type(result[0]).__name__ == 'OCRResult':
-            import sys
-            sys.stderr.write("INFO: Processando OCRResult do PaddleX\n")
+        # --- INÍCIO DA CORREÇÃO PADDLEX ---
+
+        # A lista de dados OCR. Por padrão, é result[0]
+        ocr_data_list = result[0]
+
+        # Verificar se o resultado é um objeto OCRResult do PaddleX
+        if ocr_data_list and hasattr(ocr_data_list, '__class__') and ocr_data_list.__class__.__name__ == 'OCRResult':
+            sys.stderr.write("INFO: Detectado formato PaddleX (OCRResult). Convertendo...\n")
             sys.stderr.flush()
 
-            ocr_result = result[0]
+            # Tentar múltiplas formas de acessar os dados
+            transformed_list = []
 
-            # Acessar propriedades do OCRResult
-            # dt_polys ou dt_boxes = coordenadas dos textos detectados
-            # rec_text = textos reconhecidos
-            # rec_score = scores de confiança
-
-            boxes = None
-            texts = None
-            scores = None
-
-            if hasattr(ocr_result, 'dt_polys') and ocr_result.dt_polys is not None:
-                boxes = ocr_result.dt_polys
-            elif hasattr(ocr_result, 'dt_boxes') and ocr_result.dt_boxes is not None:
-                boxes = ocr_result.dt_boxes
-
-            if hasattr(ocr_result, 'rec_text') and ocr_result.rec_text is not None:
-                texts = ocr_result.rec_text
-
-            if hasattr(ocr_result, 'rec_score') and ocr_result.rec_score is not None:
-                scores = ocr_result.rec_score
-
-            if boxes is not None and texts is not None:
-                sys.stderr.write(f"INFO: Encontradas {len(texts)} palavras\n")
+            # Método 1: Tentar acessar .data
+            if hasattr(ocr_data_list, 'data') and ocr_data_list.data:
+                sys.stderr.write("INFO: Acessando via .data\n")
                 sys.stderr.flush()
 
-                for i in range(len(texts)):
-                    text = texts[i]
-                    box = boxes[i] if i < len(boxes) else None
-                    confidence = scores[i] if scores and i < len(scores) else 0.9
+                # Formato PaddleX: [ {'box': [[...]], 'text': '...', 'score': ...}, ... ]
+                # Converter para formato PaddleOCR padrão: [ [box, (text, score)], ... ]
+                for item in ocr_data_list.data:
+                    if isinstance(item, dict) and 'box' in item and 'text' in item and 'score' in item:
+                        transformed_list.append([
+                            item['box'],
+                            (item['text'], item['score'])
+                        ])
 
-                    if not text or box is None:
-                        continue
+            # Método 2: Tentar iterar diretamente (se for iterável)
+            elif hasattr(ocr_data_list, '__iter__'):
+                sys.stderr.write("INFO: OCRResult é iterável, tentando iterar...\n")
+                sys.stderr.flush()
 
-                    # Converter polígono/box para bbox (x0, y0, x1, y1)
-                    try:
-                        if hasattr(box, '__iter__'):
-                            x_coords = [point[0] for point in box]
-                            y_coords = [point[1] for point in box]
-                            x0 = int(min(x_coords))
-                            y0 = int(min(y_coords))
-                            x1 = int(max(x_coords))
-                            y1 = int(max(y_coords))
-                        else:
-                            continue
-
-                        full_text.append(text)
-                        words.append({
-                            'text': text,
-                            'bbox': {
-                                'x0': x0,
-                                'y0': y0,
-                                'x1': x1,
-                                'y1': y1
-                            },
-                            'confidence': confidence * 100 if confidence <= 1 else confidence
-                        })
-                        total_confidence += confidence if confidence <= 1 else confidence / 100
-                        word_count += 1
-                    except Exception as e:
-                        sys.stderr.write(f"WARN: Erro ao processar box {i}: {e}\n")
-                        continue
-
-        else:
-            # Formato antigo (lista de listas)
-            for line in result[0]:
                 try:
-                    # Formato PaddleOCR: [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)]
-                    # Nas versões 3.3+, pode ser: [box, [text, confidence]] ou [box, (text, confidence)]
-                    if not line or len(line) < 2:
-                        continue
+                    for item in ocr_data_list:
+                        if isinstance(item, dict) and 'box' in item and 'text' in item and 'score' in item:
+                            transformed_list.append([
+                                item['box'],
+                                (item['text'], item['score'])
+                            ])
+                except Exception as e:
+                    sys.stderr.write(f"WARN: Erro ao iterar: {e}\n")
 
-                    box = line[0]  # Coordenadas do polígono
-                    text_data = line[1]  # (texto, confiança) ou [texto, confiança]
+            # Método 3: Explorar outros atributos comuns
+            else:
+                sys.stderr.write("INFO: Explorando atributos do OCRResult...\n")
+                attrs = [attr for attr in dir(ocr_data_list) if not attr.startswith('_')]
+                sys.stderr.write(f"INFO: Atributos públicos: {attrs[:15]}\n")
+                sys.stderr.flush()
 
-                    # Extrair texto e confiança (suporta tupla ou lista)
-                    if isinstance(text_data, (list, tuple)) and len(text_data) >= 2:
-                        text = str(text_data[0]) if text_data[0] else ""
-                        confidence = float(text_data[1]) if text_data[1] else 0.0
-                    else:
-                        # Formato inesperado, pular
-                        continue
+                # Tentar atributos comuns
+                for attr_name in ['boxes', 'texts', 'scores', 'results', 'detections']:
+                    if hasattr(ocr_data_list, attr_name):
+                        attr_value = getattr(ocr_data_list, attr_name)
+                        sys.stderr.write(f"INFO: Tentando usar .{attr_name} (tipo: {type(attr_value)})\n")
+                        sys.stderr.flush()
 
-                    if not text:
-                        continue
+            if transformed_list:
+                sys.stderr.write(f"INFO: Convertido {len(transformed_list)} itens do PaddleX\n")
+                sys.stderr.flush()
+                ocr_data_list = transformed_list
+            else:
+                sys.stderr.write("WARN: Não conseguiu extrair dados do OCRResult, retornando vazio\n")
+                sys.stderr.flush()
+                ocr_data_list = []
 
-                    # Converter polígono para bbox (x0, y0, x1, y1)
-                    x_coords = [point[0] for point in box]
-                    y_coords = [point[1] for point in box]
+        # --- FIM DA CORREÇÃO PADDLEX ---
 
-                    x0 = int(min(x_coords))
-                    y0 = int(min(y_coords))
-                    x1 = int(max(x_coords))
-                    y1 = int(max(y_coords))
-
-                    # Adicionar ao texto completo
-                    full_text.append(text)
-
-                    # Adicionar palavra com coordenadas (compatível com Tesseract)
-                    words.append({
-                        'text': text,
-                        'bbox': {
-                            'x0': x0,
-                            'y0': y0,
-                            'x1': x1,
-                            'y1': y1
-                        },
-                        'confidence': confidence * 100  # PaddleOCR retorna 0-1, converter para 0-100
-                    })
-
-                    total_confidence += confidence
-                    word_count += 1
-
-                except (IndexError, TypeError, ValueError) as e:
-                    # Pular linhas com formato inesperado
+        # O loop original agora processa 'ocr_data_list'
+        # que estará no formato correto, seja do PaddleOCR ou do PaddleX
+        for line in ocr_data_list:
+            try:
+                # Formato PaddleOCR: [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)]
+                if not line or len(line) < 2:
                     continue
+
+                box = line[0]  # Coordenadas do polígono
+                text_data = line[1]  # (texto, confiança) ou [texto, confiança]
+
+                # Extrair texto e confiança (suporta tupla ou lista)
+                if isinstance(text_data, (list, tuple)) and len(text_data) >= 2:
+                    text = str(text_data[0]) if text_data[0] else ""
+                    confidence = float(text_data[1]) if text_data[1] else 0.0
+                else:
+                    # Formato inesperado, pular
+                    continue
+
+                if not text:
+                    continue
+
+                # Converter polígono para bbox (x0, y0, x1, y1)
+                x_coords = [point[0] for point in box]
+                y_coords = [point[1] for point in box]
+
+                x0 = int(min(x_coords))
+                y0 = int(min(y_coords))
+                x1 = int(max(x_coords))
+                y1 = int(max(y_coords))
+
+                # Adicionar ao texto completo
+                full_text.append(text)
+
+                # Adicionar palavra com coordenadas (compatível com Tesseract)
+                words.append({
+                    'text': text,
+                    'bbox': {
+                        'x0': x0,
+                        'y0': y0,
+                        'x1': x1,
+                        'y1': y1
+                    },
+                    'confidence': confidence * 100  # PaddleOCR retorna 0-1, converter para 0-100
+                })
+
+                total_confidence += confidence
+                word_count += 1
+
+            except (IndexError, TypeError, ValueError) as e:
+                # Pular linhas com formato inesperado
+                sys.stderr.write(f"WARN: Erro ao processar linha: {e}\n")
+                continue
 
         # Calcular confiança média
         avg_confidence = (total_confidence / word_count * 100) if word_count > 0 else 0
+
+        sys.stderr.write(f"INFO: Total de palavras extraídas: {word_count}\n")
+        sys.stderr.flush()
 
         return {
             'success': True,
@@ -255,9 +215,7 @@ def process_image(image_path, lang='pt'):
         }
 
     except Exception as e:
-        import sys
         import traceback
-        # Mostrar traceback completo no stderr
         sys.stderr.write(f"ERRO FATAL: {type(e).__name__}: {str(e)}\n")
         sys.stderr.write(f"TRACEBACK:\n{traceback.format_exc()}\n")
         sys.stderr.flush()
