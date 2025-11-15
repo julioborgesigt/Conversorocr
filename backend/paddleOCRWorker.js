@@ -26,12 +26,32 @@ async function isConfigured() {
             return configCache;
         }
 
-        // Tentar vários comandos Python (python, python3, py)
+        // Lista unificada de comandos para testar
+        // Prioriza versões específicas compatíveis (3.11, 3.12)
         const pythonCommands = process.platform === 'win32'
-            ? ['python3', 'python', 'py']  // Ordem: python3 primeiro (você tem)
-            : ['python3', 'python'];
+            ? ['py -3.12', 'py -3.11', 'python3.12', 'python3.11', 'python3', 'python', 'py']
+            : ['python3.12', 'python3.11', 'python3', 'python'];
 
+        // Se PYTHON_COMMAND está definido no .env, testar PRIMEIRO
+        if (process.env.PYTHON_COMMAND) {
+            const cmd = process.env.PYTHON_COMMAND;
+            console.log(`🔍 Testando PYTHON_COMMAND do .env: ${cmd}`);
+            if (await testPythonCommand(cmd)) {
+                console.log(`✅ PaddleOCR detectado via PYTHON_COMMAND (${cmd})`);
+                workingPythonCommand = cmd;
+                configCache = true;
+                lastCheckTime = now;
+                return true;
+            } else {
+                console.warn(`⚠️ PYTHON_COMMAND (${cmd}) falhou no teste. Tentando fallbacks...`);
+            }
+        }
+
+        // Testar lista de fallback
         for (const pythonCommand of pythonCommands) {
+            // Não testar de novo se já falhou no .env
+            if (pythonCommand === process.env.PYTHON_COMMAND) continue;
+
             const result = await testPythonCommand(pythonCommand);
             if (result) {
                 console.log(`✅ PaddleOCR detectado via ${pythonCommand}`);
@@ -87,8 +107,15 @@ function testPythonCommand(pythonCommand) {
 
             // Python existe, agora verificar se paddleocr está instalado
             // Usar 'pip show' é MUITO mais rápido que importar (não baixa modelos)
-            const pipCommand = pythonCommand === 'py' ? 'pip' : `${pythonCommand} -m pip`;
-            const pipCheck = spawn(pipCommand, ['show', 'paddleocr'], {
+
+            // Lógica para comandos tipo 'py -3.12' vs 'python3'
+            const isPyWithVersion = pythonCommand.startsWith('py ');
+            const pipBaseCmd = isPyWithVersion ? 'py' : pythonCommand;
+            const pipArgs = isPyWithVersion
+                ? [pythonCommand.split(' ')[1], '-m', 'pip', 'show', 'paddleocr']  // ['- 3.12', '-m', 'pip', 'show', 'paddleocr']
+                : ['-m', 'pip', 'show', 'paddleocr'];  // ['-m', 'pip', 'show', 'paddleocr']
+
+            const pipCheck = spawn(pipBaseCmd, pipArgs, {
                 shell: true
             });
 
@@ -145,15 +172,17 @@ async function processDocument(imagePath, language = 'por') {
             throw new Error('Script paddleocr_processor.py não encontrado');
         }
 
-        // Usar o comando Python que foi validado na verificação
-        // Se PYTHON_COMMAND está definido no .env, usar ele (override manual)
-        // Caso contrário, usar o comando que funcionou na verificação
-        // Fallback: tentar python3 (Linux/Mac) ou python (Windows)
-        const pythonCommand = process.env.PYTHON_COMMAND
-            || workingPythonCommand
-            || (process.platform === 'win32' ? 'python' : 'python3');
+        // Garantir que temos um comando Python válido
+        if (!workingPythonCommand) {
+            console.log('⚠️ Comando Python ainda não foi validado, executando verificação...');
+            await isConfigured();
+            if (!workingPythonCommand) {
+                throw new Error('Nenhum comando Python válido com PaddleOCR foi encontrado.');
+            }
+        }
 
-        console.log(`🐍 Usando comando Python: ${pythonCommand}`);
+        const pythonCommand = workingPythonCommand;
+        console.log(`🐍 Usando comando Python validado: ${pythonCommand}`);
 
         // Executar script Python
         return new Promise((resolve, reject) => {
