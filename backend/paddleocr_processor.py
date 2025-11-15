@@ -65,12 +65,30 @@ def process_image(image_path, lang='pt'):
         import sys
         import traceback
         try:
-            if result and result[0]:
-                sys.stderr.write(f"DEBUG: Resultado tem {len(result[0])} linhas\n")
-                if len(result[0]) > 0:
-                    sys.stderr.write(f"DEBUG: Primeira linha: {result[0][0]}\n")
-                    sys.stderr.write(f"DEBUG: Tipo da segunda parte: {type(result[0][0][1])}\n")
-                sys.stderr.flush()
+            sys.stderr.write(f"DEBUG: Tipo de result: {type(result)}\n")
+            sys.stderr.write(f"DEBUG: Comprimento de result: {len(result) if result else 0}\n")
+
+            if result:
+                sys.stderr.write(f"DEBUG: Tipo de result[0]: {type(result[0])}\n")
+
+                # PaddleOCR 3.3+ pode retornar dicionário ou lista
+                # Se for dicionário, converter para lista
+                if isinstance(result[0], dict):
+                    sys.stderr.write("DEBUG: result[0] é um dicionário! Convertendo...\n")
+                    # Converter dicionário {0: [...], 1: [...]} para lista de listas
+                    result_list = []
+                    for key in sorted(result[0].keys()):
+                        result_list.extend(result[0][key] if isinstance(result[0][key], list) else [result[0][key]])
+                    result = [result_list]
+                    sys.stderr.write(f"DEBUG: Após conversão: {len(result[0])} linhas\n")
+
+                if result and result[0]:
+                    sys.stderr.write(f"DEBUG: Resultado tem {len(result[0])} linhas\n")
+                    if len(result[0]) > 0:
+                        sys.stderr.write(f"DEBUG: Primeira linha (primeiros 200 chars): {str(result[0][0])[:200]}\n")
+                        if len(result[0][0]) >= 2:
+                            sys.stderr.write(f"DEBUG: Tipo da segunda parte: {type(result[0][0][1])}\n")
+            sys.stderr.flush()
         except Exception as debug_error:
             sys.stderr.write(f"DEBUG ERROR: {debug_error}\n")
             sys.stderr.write(f"DEBUG TRACEBACK: {traceback.format_exc()}\n")
