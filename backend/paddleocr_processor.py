@@ -81,17 +81,21 @@ def process_image(image_path, lang='pt'):
                 if type(result[0]).__name__ == 'OCRResult':
                     sys.stderr.write("DEBUG: result[0] é um OCRResult do PaddleX!\n")
 
+                    # Explorar TODOS os atributos e métodos públicos
+                    all_attrs = [attr for attr in dir(result[0]) if not attr.startswith('_')]
+                    sys.stderr.write(f"DEBUG: Atributos públicos do OCRResult: {all_attrs[:20]}\n")
+
                     # Tentar acessar propriedades comuns do OCRResult
-                    if hasattr(result[0], 'dt_polys'):
-                        sys.stderr.write(f"DEBUG: result[0].dt_polys existe, tipo: {type(result[0].dt_polys)}\n")
-                        sys.stderr.write(f"DEBUG: Tamanho de dt_polys: {len(result[0].dt_polys) if hasattr(result[0].dt_polys, '__len__') else 'N/A'}\n")
-                    if hasattr(result[0], 'rec_text'):
-                        sys.stderr.write(f"DEBUG: result[0].rec_text existe, tipo: {type(result[0].rec_text)}\n")
-                        sys.stderr.write(f"DEBUG: Tamanho de rec_text: {len(result[0].rec_text) if hasattr(result[0].rec_text, '__len__') else 'N/A'}\n")
-                    if hasattr(result[0], 'rec_score'):
-                        sys.stderr.write(f"DEBUG: result[0].rec_score existe, tipo: {type(result[0].rec_score)}\n")
-                    if hasattr(result[0], 'dt_boxes'):
-                        sys.stderr.write(f"DEBUG: result[0].dt_boxes existe\n")
+                    for attr_name in ['dt_polys', 'rec_text', 'rec_score', 'dt_boxes', 'boxes', 'texts', 'scores', 'json', 'to_dict', 'data']:
+                        if hasattr(result[0], attr_name):
+                            attr_value = getattr(result[0], attr_name)
+                            sys.stderr.write(f"DEBUG: {attr_name} existe! Tipo: {type(attr_value)}\n")
+                            if hasattr(attr_value, '__len__'):
+                                sys.stderr.write(f"DEBUG: {attr_name} tamanho: {len(attr_value)}\n")
+                            if callable(attr_value):
+                                sys.stderr.write(f"DEBUG: {attr_name} é um método (callable)\n")
+                            else:
+                                sys.stderr.write(f"DEBUG: {attr_name} primeiros chars: {str(attr_value)[:200]}\n")
 
             sys.stderr.flush()
         except Exception as debug_error:
