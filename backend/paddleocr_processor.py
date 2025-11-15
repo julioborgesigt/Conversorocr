@@ -102,8 +102,8 @@ def process_image(image_path, lang='pt'):
 
             # Método 2: Tentar acessar chaves conhecidas do PaddleX OCR
             # Baseado nas chaves vistas: input_path, page_index, doc_preprocessor_res, etc.
-            # Chaves de dados OCR tipicamente: dt_polys, rec_text, rec_score
-            for key_name in ['dt_polys', 'rec_text', 'rec_score', 'boxes', 'texts', 'scores']:
+            # Chaves de dados OCR tipicamente: dt_polys, rec_texts, rec_scores (plurais!)
+            for key_name in ['dt_polys', 'rec_texts', 'rec_scores', 'rec_polys', 'boxes', 'texts', 'scores']:
                 if key_name in available_keys:
                     value = ocr_data_list[key_name] if hasattr(ocr_data_list, '__getitem__') else getattr(ocr_data_list, key_name, None)
                     sys.stderr.write(f"INFO: Chave '{key_name}' encontrada! Tipo: {type(value)}\n")
@@ -114,22 +114,22 @@ def process_image(image_path, lang='pt'):
             # Método 3: Tentar acessar via índice de dicionário
             try:
                 dt_polys = ocr_data_list['dt_polys'] if 'dt_polys' in available_keys else None
-                rec_text = ocr_data_list['rec_text'] if 'rec_text' in available_keys else None
-                rec_score = ocr_data_list['rec_score'] if 'rec_score' in available_keys else None
+                rec_texts = ocr_data_list['rec_texts'] if 'rec_texts' in available_keys else None
+                rec_scores = ocr_data_list['rec_scores'] if 'rec_scores' in available_keys else None
 
-                if dt_polys and rec_text:
-                    sys.stderr.write(f"INFO: Encontrados dados OCR! {len(rec_text)} textos\n")
+                if dt_polys and rec_texts:
+                    sys.stderr.write(f"INFO: Encontrados dados OCR! {len(rec_texts)} textos\n")
                     sys.stderr.flush()
 
-                    for i in range(len(rec_text)):
-                        text = rec_text[i]
+                    for i in range(len(rec_texts)):
+                        text = rec_texts[i]
                         box = dt_polys[i] if i < len(dt_polys) else None
-                        score = rec_score[i] if rec_score and i < len(rec_score) else 0.9
+                        score = rec_scores[i] if rec_scores and i < len(rec_scores) else 0.9
 
                         if text and box is not None:
                             transformed_list.append([box, (text, score)])
                 else:
-                    sys.stderr.write("WARN: Não encontrou dt_polys ou rec_text nas chaves\n")
+                    sys.stderr.write("WARN: Não encontrou dt_polys ou rec_texts nas chaves\n")
                     sys.stderr.flush()
             except Exception as e:
                 sys.stderr.write(f"WARN: Erro ao acessar dados via chaves: {e}\n")
