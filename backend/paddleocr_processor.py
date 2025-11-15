@@ -89,61 +89,53 @@ def process_image(image_path, lang='pt'):
             # Tentar múltiplas formas de acessar os dados
             transformed_list = []
 
-            # Método 1: Tentar acessar .data
-            if hasattr(ocr_data_list, 'data') and ocr_data_list.data:
-                sys.stderr.write("INFO: Acessando via .data\n")
+            # Método 1: Iterar para descobrir as chaves disponíveis
+            sys.stderr.write("INFO: Explorando chaves do OCRResult...\n")
+            available_keys = []
+            try:
+                for key in ocr_data_list:
+                    available_keys.append(key)
+                sys.stderr.write(f"INFO: Chaves disponíveis: {available_keys}\n")
                 sys.stderr.flush()
+            except Exception as e:
+                sys.stderr.write(f"WARN: Erro ao listar chaves: {e}\n")
 
-                # Formato PaddleX: [ {'box': [[...]], 'text': '...', 'score': ...}, ... ]
-                # Converter para formato PaddleOCR padrão: [ [box, (text, score)], ... ]
-                for item in ocr_data_list.data:
-                    if isinstance(item, dict) and 'box' in item and 'text' in item and 'score' in item:
-                        transformed_list.append([
-                            item['box'],
-                            (item['text'], item['score'])
-                        ])
-
-            # Método 2: Tentar iterar diretamente (se for iterável)
-            elif hasattr(ocr_data_list, '__iter__'):
-                sys.stderr.write("INFO: OCRResult é iterável, tentando iterar...\n")
-                sys.stderr.flush()
-
-                try:
-                    item_count = 0
-                    for item in ocr_data_list:
-                        item_count += 1
-                        if item_count <= 3:  # Mostrar apenas os 3 primeiros
-                            sys.stderr.write(f"INFO: Item {item_count}: tipo={type(item)}, valor={str(item)[:200]}\n")
-                            if isinstance(item, dict):
-                                sys.stderr.write(f"INFO: Item {item_count} é dict com chaves: {list(item.keys())}\n")
-
-                        if isinstance(item, dict) and 'box' in item and 'text' in item and 'score' in item:
-                            transformed_list.append([
-                                item['box'],
-                                (item['text'], item['score'])
-                            ])
-
-                    sys.stderr.write(f"INFO: Total de itens iterados: {item_count}\n")
-                    sys.stderr.flush()
-                except Exception as e:
-                    sys.stderr.write(f"WARN: Erro ao iterar: {e}\n")
-                    import traceback
-                    sys.stderr.write(f"TRACEBACK: {traceback.format_exc()}\n")
+            # Método 2: Tentar acessar chaves conhecidas do PaddleX OCR
+            # Baseado nas chaves vistas: input_path, page_index, doc_preprocessor_res, etc.
+            # Chaves de dados OCR tipicamente: dt_polys, rec_text, rec_score
+            for key_name in ['dt_polys', 'rec_text', 'rec_score', 'boxes', 'texts', 'scores']:
+                if key_name in available_keys:
+                    value = ocr_data_list[key_name] if hasattr(ocr_data_list, '__getitem__') else getattr(ocr_data_list, key_name, None)
+                    sys.stderr.write(f"INFO: Chave '{key_name}' encontrada! Tipo: {type(value)}\n")
+                    if hasattr(value, '__len__'):
+                        sys.stderr.write(f"INFO: '{key_name}' tem tamanho: {len(value)}\n")
                     sys.stderr.flush()
 
-            # Método 3: Explorar outros atributos comuns
-            else:
-                sys.stderr.write("INFO: Explorando atributos do OCRResult...\n")
-                attrs = [attr for attr in dir(ocr_data_list) if not attr.startswith('_')]
-                sys.stderr.write(f"INFO: Atributos públicos: {attrs[:15]}\n")
-                sys.stderr.flush()
+            # Método 3: Tentar acessar via índice de dicionário
+            try:
+                dt_polys = ocr_data_list['dt_polys'] if 'dt_polys' in available_keys else None
+                rec_text = ocr_data_list['rec_text'] if 'rec_text' in available_keys else None
+                rec_score = ocr_data_list['rec_score'] if 'rec_score' in available_keys else None
 
-                # Tentar atributos comuns
-                for attr_name in ['boxes', 'texts', 'scores', 'results', 'detections']:
-                    if hasattr(ocr_data_list, attr_name):
-                        attr_value = getattr(ocr_data_list, attr_name)
-                        sys.stderr.write(f"INFO: Tentando usar .{attr_name} (tipo: {type(attr_value)})\n")
-                        sys.stderr.flush()
+                if dt_polys and rec_text:
+                    sys.stderr.write(f"INFO: Encontrados dados OCR! {len(rec_text)} textos\n")
+                    sys.stderr.flush()
+
+                    for i in range(len(rec_text)):
+                        text = rec_text[i]
+                        box = dt_polys[i] if i < len(dt_polys) else None
+                        score = rec_score[i] if rec_score and i < len(rec_score) else 0.9
+
+                        if text and box is not None:
+                            transformed_list.append([box, (text, score)])
+                else:
+                    sys.stderr.write("WARN: Não encontrou dt_polys ou rec_text nas chaves\n")
+                    sys.stderr.flush()
+            except Exception as e:
+                sys.stderr.write(f"WARN: Erro ao acessar dados via chaves: {e}\n")
+                import traceback
+                sys.stderr.write(f"TRACEBACK: {traceback.format_exc()}\n")
+                sys.stderr.flush()
 
             if transformed_list:
                 sys.stderr.write(f"INFO: Convertido {len(transformed_list)} itens do PaddleX\n")
