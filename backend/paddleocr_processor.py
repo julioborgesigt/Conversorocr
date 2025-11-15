@@ -109,14 +109,27 @@ def process_image(image_path, lang='pt'):
                 sys.stderr.flush()
 
                 try:
+                    item_count = 0
                     for item in ocr_data_list:
+                        item_count += 1
+                        if item_count <= 3:  # Mostrar apenas os 3 primeiros
+                            sys.stderr.write(f"INFO: Item {item_count}: tipo={type(item)}, valor={str(item)[:200]}\n")
+                            if isinstance(item, dict):
+                                sys.stderr.write(f"INFO: Item {item_count} é dict com chaves: {list(item.keys())}\n")
+
                         if isinstance(item, dict) and 'box' in item and 'text' in item and 'score' in item:
                             transformed_list.append([
                                 item['box'],
                                 (item['text'], item['score'])
                             ])
+
+                    sys.stderr.write(f"INFO: Total de itens iterados: {item_count}\n")
+                    sys.stderr.flush()
                 except Exception as e:
                     sys.stderr.write(f"WARN: Erro ao iterar: {e}\n")
+                    import traceback
+                    sys.stderr.write(f"TRACEBACK: {traceback.format_exc()}\n")
+                    sys.stderr.flush()
 
             # Método 3: Explorar outros atributos comuns
             else:
